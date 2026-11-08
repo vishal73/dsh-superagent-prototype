@@ -23,7 +23,7 @@ const SkillNameSchema = z.string().regex(SKILL_NAME).refine(name => !(Object.key
 /** The built-in parts a team may override, by key: both roles' parts, the Source skills, and the generated parts' templates. */
 const PART_KEYS = ['runtime/shared', 'runtime/orchestrator', 'runtime/worker', 'runtime/subscriptions', 'runtime/replies',
   'runtime/dispatch', 'runtime/work', 'runtime/admission', 'runtime/handoff/orchestrator', 'runtime/handoff/worker', 'runtime/environment',
-  'runtime/policy', 'runtime/policy/none', 'skill/telegram', 'skill/github', 'skill/desktop'] as const
+  'runtime/policy', 'runtime/policy/none', 'skill/telegram', 'skill/github', 'skill/desktop', 'skill/browser'] as const
 export type PartKey = typeof PART_KEYS[number]
 /** A team's text for a built-in part, and `base`, the key of the built-in text it was edited from. */
 const OverrideSchema = z.object({ text: z.string(),
@@ -68,6 +68,7 @@ export const builtInParts = (): Readonly<Record<PartKey, BuiltInPart>> => parts 
   'skill/telegram': { roles: BOTH, text: `${sourceSkills.telegram}\n\n## CLI usage\n${cliNotes}` },
   'skill/github': { roles: BOTH, text: `${sourceSkills.github}\n\n## CLI usage\n${cliNotes}` },
   'skill/desktop': { roles: BOTH, text: `${sourceSkills.desktop}\n\n## CLI usage\n${cliNotes}` },
+  'skill/browser': { roles: BOTH, text: `${sourceSkills.browser}\n\n## CLI usage\n${cliNotes}` },
 }
 /** The key of a built-in text, which an override's `base` records. */
 export const builtInBase = (text: string): string => key('prompt-built-in', text)
@@ -119,7 +120,7 @@ export function composePrompt(config: PromptConfig, role: Role, environment?: st
   return promptParts(config, role, environment, policy).map(part => part.text).join('\n\n')
 }
 export function composeSkill(config: PromptConfig, name: string): string {
-  return name === 'telegram' || name === 'github' || name === 'desktop' ? builtIn(config, `skill/${name}`) : config.skills[name] ?? ''
+  return name === 'telegram' || name === 'github' || name === 'desktop' || name === 'browser' ? builtIn(config, `skill/${name}`) : config.skills[name] ?? ''
 }
 
 /** An override whose built-in text changed since its `base`, with that text when kept, or whose part this version no longer has. */
@@ -144,7 +145,7 @@ export class Prompts {
   }
   /** Returns skills to register in every Session: the built-in Source skills followed by team skills. */
   skills(config: PromptConfig): [string, string][] {
-    return ['telegram', 'github', 'desktop', ...Object.keys(config.skills)].map(name => [name, composeSkill(config, name)])
+    return ['telegram', 'github', 'desktop', 'browser', ...Object.keys(config.skills)].map(name => [name, composeSkill(config, name)])
   }
   current(): PromptVersion {
     const revision = this.versions.revision()

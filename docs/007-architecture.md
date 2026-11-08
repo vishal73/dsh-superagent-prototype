@@ -282,7 +282,7 @@ Some generic modules still refer directly to GitHub or Telegram:
 - Runtime sends `pullEndNotices` for merged or closed Tickets.
 - Executor tools bind reported pull requests with `readPull` and `claimPull`, using the GitHub context exposed by Runtime.
 - MasterAssessor reads repository files with `readRepositoryPath`.
-- Sessions and Prompts register the built-in skills for GitHub, Telegram and agent-desktop. Migration converts their schema-10 records.
+- Sessions and Prompts register the built-in skills for GitHub, Telegram, agent-desktop and agent-browser. Migration converts their schema-10 records.
 - Setup probes only GitHub account fields (`SETUP_FIELDS`); a Source reports its own account problem through `SourceContext.problem`.
 
 

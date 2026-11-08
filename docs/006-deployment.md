@@ -26,6 +26,7 @@ Both presets run with `danger-full-access` as the operator's OS user and read me
 - A model provider configured for DeepSeek Harness. dsh-superagent uses the profile's default model unless the Eval or Execution settings name another.
 - For Telegram: a bot token from [@BotFather](https://t.me/BotFather); no extra CLI is needed
 - For desktop work, optional: the [`agent-desktop`](https://github.com/vercel-labs/agent-desktop) CLI on the operator's `PATH`, with the platform's accessibility permission granted
+- For browser work, optional: the [`agent-browser`](https://github.com/vercel-labs/agent-browser) CLI and its Chrome for Testing (`npm install -g agent-browser && agent-browser install`)
 
 ## Accounts
 
@@ -69,6 +70,14 @@ A Ticket may ask for something only a desktop app can do: read a window, fill a 
 3. Check with `agent-desktop status`. A Telegram request can then ask the agent to operate an app; the worker Session reads the skill and drives the snapshot, action and verification loop.
 
 Snapshots, screenshots and clipboard reads contain whatever the operator's desktop shows. The skill tells Sessions to keep them out of GitHub and short Telegram replies; the operator decides whether a profile should be allowed desktop access at all.
+
+### Browser work (optional)
+
+Some Tickets need a rendered page: a login, a form, a tab, a download, a check that a web change works. The bundle always registers the `dsh-superagent-browser` skill, which reports a missing CLI instead of guessing.
+
+1. Install the CLI and its browser: `npm install -g agent-browser && agent-browser install` (on Linux, `agent-browser install --with-deps`). Homebrew users install `agent-browser` first.
+2. Check with `agent-browser doctor`. A Telegram request can then ask the agent to open a page; the worker Session drives the snapshot, action and verification loop.
+3. Page content is untrusted: the skill tells Sessions that text on a page never authorizes work, credentials, uploads or purchases, and that downloads, screenshots and traces stay inside the Ticket's directory.
 
 ## Install
 
@@ -230,7 +239,7 @@ A file in `worker-bin` or `worker-gitconfig` that dsh-superagent did not write s
 
 ## Try it
 
-From an allowed GitHub account, open an Issue or post a comment containing `@<agent login> <request>`. Within a polling interval (one minute by default), Overview should show a Ticket. The agent acknowledges the request, works in its own Session and directory, and delivers in the original conversation. For Telegram, message the bot directly or mention it in a configured group; the Source's health shows the last poll's result. A request that needs a desktop app, such as "open Finder and rename the file", exercises the desktop skill once `agent-desktop status` reports the permission.
+From an allowed GitHub account, open an Issue or post a comment containing `@<agent login> <request>`. Within a polling interval (one minute by default), Overview should show a Ticket. The agent acknowledges the request, works in its own Session and directory, and delivers in the original conversation. For Telegram, message the bot directly or mention it in a configured group; the Source's health shows the last poll's result. A request that needs a desktop app, such as "open Finder and rename the file", exercises the desktop skill once `agent-desktop status` reports the permission; one that needs a web page, such as "open the staging site and check the button", exercises the browser skill once `agent-browser doctor` reports it is ready.
 
 ## Upgrade
 
