@@ -26,6 +26,8 @@ export interface MainToolsHost {
   readonly settings: Pick<Settings, 'view' | 'block' | 'save' | 'pause' | 'sync'>
   readonly assessor: Pick<MasterAssessor, 'context' | 'read' | 'decide'>
   readonly resources: ResourceHost
+  /** Starts a fresh main-conversation Session on the next mount, for a person who asked for a new chat. */
+  newChat(): void
   /** Schedules a pass to carry out work queued by an Engine command (such as an Eval or ticket resume). */
   requestPass(): void
   sendReplies(): Promise<void>
@@ -262,6 +264,12 @@ export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
           args.value, args.revision, 'tool')
         return saved
       },
+    }),
+    tool({
+      name: 'orchestrator_new_chat',
+      description: 'Start a fresh conversation for a person who sent /new.',
+      schema: z.object({}).strict(),
+      execute: async () => { host.newChat(); return { started: true } },
     }),
     tool({
       name: 'orchestrator_model_set',
