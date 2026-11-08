@@ -6,7 +6,6 @@ import { basename } from 'node:path'
 import { z } from 'zod'
 import { isoTime, said, type AcceptMode, type AdmissionCell, type ChannelRef, type Decision, type Execution, type Follow, type MandateBasis,
   type Reason, type Thread, type Ticket, type TicketInput, type TriggerDisposition } from '../core/index.ts'
-import { feishuChatLink } from '../sources/feishu-channel.ts'
 import { POLL_HORIZON_MS } from '../sources/poll.ts'
 import { SettingsSchema, policyVersion, type SettingsOrigin } from '../policy.ts'
 import { autoMergeThreshold, teamDefaults } from './context.ts'
@@ -64,9 +63,8 @@ export function migrateTo11(store: Store): void {
     store.delete(name)
   }
   for (const name of DEAD_KEYS.flatMap(prefix => prefix.endsWith(':') ? store.keys(prefix) : [prefix])) store.delete(name)
-  // Source read pages, prompt previews, and Feishu message links are now cached in memory instead of SQLite.
-  store.db.exec(`DELETE FROM kv WHERE key LIKE 'feishu-read:%' OR key LIKE 'github-read:%' OR key LIKE 'feishu-source-link:%'
-    OR key LIKE '%:prompt-preview/%'`)
+  // Source read pages and prompt previews are now cached in memory instead of SQLite.
+  store.db.exec(`DELETE FROM kv WHERE key LIKE 'github-read:%' OR key LIKE '%:prompt-preview/%'`)
   queueEarlierWork(store)
   // Convert dropped-message prose reasons into reason codes localized by the panel.
   store.db.exec(`UPDATE outbox SET value = json_set(value, '$.dropped.reason', CASE value ->> '$.dropped.reason'
@@ -197,42 +195,24 @@ function migrateSettingsRecords(store: Store): void {
     store.set(name, { ...version, source: ORIGINS[version.source] ?? version.source, ...settings.success ? { settings: settings.data } : {} })
   }
 }
-interface Member { name?: string; feishuId?: string; github?: string }
+interface Member { name?: string; github?: string }
 /**
  * Convert legacy flat settings (chat lists in Policy, top-level pause flag) or pre-schema-11 domain settings into current domain blocks:
  * strips fields replaced by rule instructions and prompts (Executor reviewers and branch prefix, rule `visual` flag, `autoMergeLineLimit`, Source `authority`, GitHub `mergeCli`), extracts `paused` to the top level, and splits cross-source `members` into per-source `policy.sources` entries.
  */
+/** Strip fields replaced by rule instructions and prompts (Executor reviewers and branch prefix, rule `visual` flag, `autoMergeLineLimit`, Source `authority`, GitHub `mergeCli`), and move `paused` to the top level. */
 export function migrateSettings(value: unknown): unknown {
-  if (!isObject(value)) return value
-  if (!('members' in value || 'allowedChats' in value || 'admission' in value)) return withoutRemovedFields(value)
-  const old = value as { models?: { orchestrator?: unknown; worker?: unknown }; paused?: boolean; allowedChats?: string[]; members?: unknown[];
-    allowDirectMessages?: boolean; pollSeconds?: number; maxWorkers?: number; admission?: { mode?: string; chats?: string[]; timeoutSeconds?: number; rules?: unknown[] } }
-  const chats = new Map<string, 'mentions' | 'all'>()
-  for (const chatId of old.allowedChats ?? []) chats.set(chatId, 'mentions')
-  // Observed chats were active only when admission was enabled.
-  if (old.admission?.mode !== 'off') for (const chatId of old.admission?.chats ?? []) chats.set(chatId, 'all')
-  const feishu = { chats: [...chats].map(([chatId, listen]) => ({ chatId, listen })), directMessages: old.allowDirectMessages ?? true }
-  return withoutRemovedFields({
-    sources: { feishu: { enabled: true, config: feishu }, github: { enabled: true, config: { pollSeconds: old.pollSeconds ?? 60 } } },
-    policy: { ...(old.members ? { members: old.members } : {}), ...(old.admission?.rules ? { rules: old.admission.rules } : {}) },
-    eval: { ...(old.admission?.mode ? { mode: old.admission.mode } : {}), ...(old.admission?.timeoutSeconds ? { timeoutSeconds: old.admission.timeoutSeconds } : {}),
-      model: old.models?.orchestrator ?? null },
-    executor: { model: old.models?.worker ?? null, ...(old.maxWorkers ? { maxWorkers: old.maxWorkers } : {}), paused: old.paused ?? false },
-  })
+  return isObject(value) ? withoutRemovedFields(value) : value
 }
 function withoutRemovedFields(value: Stored): Stored {
   const { executor, policy, sources, ...rest } = value as { executor?: Stored; policy?: Stored; sources?: Record<string, Stored> }
   // `paused` is now a top-level setting rather than a field on `executor`.
   const { reviewer: _reviewer, visualReviewer: _visualReviewer, branchPrefix: _branchPrefix, paused, ...kept } = executor ?? {}
-  const { members, memberChat, autoMergeLineLimit: _limit, rules: storedRules, ...policyRest } = policy ?? {}
+  const { members, memberChat: _memberChat, autoMergeLineLimit: _limit, rules: storedRules, ...policyRest } = policy ?? {}
   const rules = Array.isArray(storedRules) ? storedRules.map((rule: unknown) => { if (!isObject(rule)) return rule; const { visual: _visual, ...fields } = rule; return fields })
     : storedRules
   const people = Array.isArray(members) ? members as Member[] : undefined
-  const parts = people ? {
-    feishu: { allowed: people.filter(member => member.feishuId).map(member => ({ id: member.feishuId!, ...(member.name ? { name: member.name } : {}) })),
-      ...(memberChat ? { syncChat: memberChat } : {}) },
-    github: { allowed: people.filter(member => member.github).map(member => ({ id: member.github! })) },
-  } : undefined
+  const parts = people ? { github: { allowed: people.filter(member => member.github).map(member => ({ id: member.github! })) } } : undefined
   // The GitHub Source no longer configures a dedicated merge account; auto-merge policy now lives in prompts.
   const withoutMerge = (id: string, config: unknown) => { if (id !== 'github' || !isObject(config)) return config; const { mergeCli: _mergeCli, ...fields } = config; return fields }
   const instances = sources ? Object.fromEntries(Object.entries(sources).map(([id, instance]) => {
@@ -249,7 +229,7 @@ function withoutRemovedFields(value: Stored): Stored {
 /** Prompt configuration shape saved before team sections existed, when all sections (including fixed ones) were editable. */
 const LegacyPromptConfigSchema = z.object({ shared: z.string(), orchestrator: z.string(), worker: z.string(), guides: z.record(z.string(), z.string()) })
 /** Guide names from legacy prompt configurations that are now fixed built-in prompt sections or skills. */
-const LEGACY_FIXED = new Set(['cli', 'subscriptions', 'replies', 'reviews', 'dispatch', 'work', 'feishu', 'github'])
+const LEGACY_FIXED = new Set(['cli', 'subscriptions', 'replies', 'reviews', 'dispatch', 'work', 'telegram', 'github'])
 /** Tool names used in saved prompts before the domain vocabulary rename, paired with what replaces them now. */
 const RENAMED_TOOLS: readonly (readonly [string, string])[] = [
   ['orchestrator_subscription_remove', 'orchestrator_thread_unsubscribe'], ['orchestrator_subscriptions', 'orchestrator_threads'],
@@ -314,14 +294,14 @@ function migratePrompts(store: Store): void {
   const before = store.get<unknown>('settings-before-9')
   const policy = (isObject(before) ? before.policy : undefined) as { autoMergeLineLimit?: unknown; members?: unknown } | undefined
   const limit = typeof policy?.autoMergeLineLimit === 'number' ? policy.autoMergeLineLimit : 200
-  const mapped = ((Array.isArray(policy?.members) ? policy.members : []) as Member[]).filter(person => person.feishuId && person.github)
+  const mapped = ((Array.isArray(policy?.members) ? policy.members : []) as Member[]).filter(person => person.github)
   const revision = store.get<number>('prompt-revision')
   const current = revision === undefined ? undefined : store.get<PromptVersion>(`prompt-version:${revision}`)
   const config = current?.config ?? { ...teamDefaults, skills: {} }
   const delivery = config.delivery.includes(autoMergeThreshold(200)) ? config.delivery.replace(autoMergeThreshold(200), autoMergeThreshold(limit))
     : limit === 200 ? config.delivery : `${config.delivery}\nEnable auto-merge only on a PR that changes fewer than ${limit} lines (additions plus deletions).`
   const identities = mapped.length && !config.skills.identities ? { identities: ['The same colleague may use a different account on each Source. When you mention, assign or request a review from someone you met on another Source, use their account on this one:',
-    ...mapped.map(person => `- ${person.name ?? person.feishuId} (Feishu ${person.feishuId}) is @${person.github} on GitHub`)].join('\n') } : {}
+    ...mapped.map(person => `- ${person.name ?? person.github} is @${person.github} on GitHub`)].join('\n') } : {}
   const next = { ...config, delivery, skills: { ...config.skills, ...identities } }
   if (JSON.stringify(next) === JSON.stringify(config)) return
   const previous = current?.revision ?? 0
@@ -333,16 +313,14 @@ function migratePrompts(store: Store): void {
 const CELLS: readonly string[] = ['listedUnaddressed', 'unlistedAddressed', 'unlistedUnaddressed']
 /**
  * Upgrade a legacy mandate basis object to the current tagged union shape.
- * Current bases recorded `source` and `scope`; older ones recorded a Feishu chat directly (`chatId`) or schema 6's `legacyAuthority`.
+ * Current bases recorded `source` and `scope`; older ones recorded schema 6's `legacyAuthority`.
  * A basis with neither an admission table cell nor `followup` came from a listed sender (`addressed` when it recorded `addressed`, `sender`, and `source`, else `listed`), which holds while the sender remains listed.
  */
 export function basisOf(stored: unknown): MandateBasis {
   // Missing or non-object bases default to a listed-sender basis (`via: 'listed'`).
   const old = isObject(stored) ? stored : {}
   if (typeof old.via === 'string') return old as unknown as MandateBasis
-  // Older Feishu bases recorded `chatId` and `direct` at the top level instead of inside `scope`.
-  const chat = text(old.chatId) ? { source: 'feishu', scope: { chatId: old.chatId, direct: old.direct === true } } : {}
-  const received = text(old.source) ? { source: old.source as string, ...isObject(old.scope) ? { scope: old.scope } : {}, ...text(old.row) ? { row: old.row as string } : {} } : chat
+  const received = text(old.source) ? { source: old.source as string, ...isObject(old.scope) ? { scope: old.scope } : {}, ...text(old.row) ? { row: old.row as string } : {} } : {}
   const sender = text(old.sender) ?? text(old.member)
   const common = { ...received, ...sender ? { sender } : {}, ...Array.isArray(old.rules) ? { rules: old.rules as string[] } : {} }
   const addressed = old.addressed === 'mention' || old.addressed === 'direct' ? old.addressed
@@ -517,61 +495,12 @@ function backfillThreadTimes(store: Store): void {
   }
 }
 
-/** Upgrade stored source state (Feishu topics, direct-chat flags, thread links, GitHub cursors, and pending assessments) to schema 11. */
+/** Upgrade stored source state (GitHub cursors and pending assessments) to schema 11. */
 function migrateSourceRecords(store: Store): void {
-  feishuTopics(store)
-  feishuDirectAddresses(store)
-  feishuThreadLinks(store)
   issueSourceRecords(store)
   githubCursors(store)
   assessmentTriggers(store)
 }
-/** Convert legacy Feishu topic ID arrays into maps keyed by topic ID with the chat's last recovery timestamp. */
-function feishuTopics(store: Store): void {
-  for (const name of store.keys(KV.feishu.topics)) {
-    const topics: unknown = store.get(name)
-    if (!Array.isArray(topics)) continue
-    const seen = store.get(KV.feishu.history(name.slice(KV.feishu.topics.prefix.length))) ?? new Date().toISOString()
-    store.set(name, Object.fromEntries(topics.map(id => [String(id), seen])))
-  }
-}
-/**
- * Backfill `direct: 'true'` onto Feishu channel addresses from `KV.feishu.chats`, because Feishu `oc_` chat IDs do not
- * distinguish direct messages from group chats on their own.
- */
-function feishuDirectAddresses(store: Store): void {
-  const chats = store.get(KV.feishu.chats) ?? {}
-  const direct = (channel: unknown): channel is ChannelRef => isObject(channel) && channel.source === 'feishu' && isObject(channel.address)
-    && chats[String(channel.address.chatId)] === true && channel.address.direct === undefined
-  const marked = (channel: ChannelRef): ChannelRef => direct(channel)
-    ? { ...channel, address: { ...channel.address, direct: 'true' } } : channel
-  for (const table of ['trigger', 'outbox'] as const) {
-    for (const row of store.db.prepare(`SELECT id, value FROM ${table} WHERE value ->> '$.channel.source' = 'feishu'`).all()) {
-      const value = JSON.parse(String(row.value)) as Stored
-      if (!direct(value.channel)) continue
-      const rewritten = JSON.stringify({ ...value, channel: marked(value.channel) })
-      store.db.prepare(`UPDATE ${table} SET value = ? WHERE id = ?`).run(rewritten, row.id!)
-    }
-  }
-  for (const row of store.db.prepare('SELECT id, value FROM ticket').all()) {
-    const ticket = JSON.parse(String(row.value)) as Ticket
-    if (ticket.channels.some(direct)) store.tickets.save({ ...ticket, channels: ticket.channels.map(marked) })
-  }
-}
-/** Backfill chat URLs onto Feishu threads created before threads stored their own URL, inferring the brand from existing trigger URLs. */
-function feishuThreadLinks(store: Store): void {
-  const lark = store.db.prepare(`SELECT 1 FROM trigger WHERE value ->> '$.source' = 'feishu'
-    AND value ->> '$.url' LIKE '%larksuite.com%' LIMIT 1`).get()
-  for (const thread of store.threads.list()) {
-    if (thread.ref.source !== 'feishu' || typeof thread.meta.url === 'string' || store.read.firstTrigger(thread.key)?.url) continue
-    const chatId = thread.ref.id.split(':')[0]
-    if (chatId) store.threads.save({ ...thread, meta: { ...thread.meta, url: feishuChatLink(lark ? 'lark' : 'feishu', chatId) } })
-  }
-}
-/**
- * Reassign triggers from the removed `github-issue` source to `github`, schedule a retry from the earliest waiting message
- * within `POLL_HORIZON_MS` on each issue that had pending messages, and delete the obsolete `github-issue` KV keys.
- */
 function issueSourceRecords(store: Store): void {
   store.db.exec(`UPDATE trigger SET value = json_set(value, '$.source', 'github') WHERE value ->> '$.source' = 'github-issue'`)
   const pending = store.get('github-issue-pending' as Key<Record<string, { number: number; at: string }>>) ?? {}

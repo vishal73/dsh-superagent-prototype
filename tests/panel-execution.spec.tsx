@@ -61,13 +61,13 @@ it('shows a Ticket with its stage, its Mandate details with the Trigger and Deci
   // A Thread this Ticket follows reads as subscribed on its page, though no other Ticket follows it.
   expect(all('.dt-list .dt-ticket .dt-stage').map(stage => stage.textContent)).toContain(zh.threadSubscribed)
   expect(all('.dt-list .dt-ticket .dt-stage').map(stage => stage.textContent)).not.toContain(zh.threadUnsubscribed)
-  expect(all('.dt-status-line .dt-lv').map(item => item.textContent)).toEqual(['授权 明确', '发起 飞书 · Alice', expect.stringMatching(/^更新 /)])
+  expect(all('.dt-status-line .dt-lv').map(item => item.textContent)).toEqual(['授权 明确', '发起 Telegram · Alice', expect.stringMatching(/^更新 /)])
   for (const expected of ['修复登录页回归', '点名方式@ 智能体', '名单里的人明确请求，由主 Session 接单', '未送达：等待派工运行',
     'Alice：顺便改标题']) expect(text()).toContain(expected)
-  expect(all('.dt-chip').map(chip => chip.textContent)).toContain('飞书团队群')
+  expect(all('.dt-chip').map(chip => chip.textContent)).toContain('Telegram团队群')
   await click(zh['term.channel'])
-  expect(all('.dt-disclosure-body a').map(link => [link.textContent, link.getAttribute('href')])).toEqual([['飞书消息',
-    'https://applink.feishu.cn/client/chat/open?openChatId=oc_1'], ['GitHub #42', 'https://github.com/acme/widgets/issues/42']])
+  expect(all('.dt-disclosure-body a').map(link => [link.textContent, link.getAttribute('href')])).toEqual([['Telegram 消息',
+    'https://t.me/c/123/10'], ['GitHub #42', 'https://github.com/acme/widgets/issues/42']])
   await click(zh['term.environment'])
   expect(all('.dt-disclosure-body .dt-table tr').map(row => row.textContent)).toEqual(['DSH_SUPERAGENT_DIR/w/t1',
     'DSH_SUPERAGENT_GITHUB_NUMBER—'])
@@ -91,8 +91,7 @@ it('links a question to its Channel, folds consecutive automated messages among 
     '2026-09-22T00:06:00Z', 1), ci('i2', '2026-09-22T00:05:00Z', 0)] }
   await mount()
   await click(all('.dt-open').find(button => button.textContent === '修复回归')!)
-  expect(all('.dt-banner a').map(link => [link.textContent, link.getAttribute('href')])).toEqual([['去飞书回答',
-    'https://applink.feishu.cn/client/chat/open?openChatId=oc_1']])
+  expect(all('.dt-banner a').map(link => link.getAttribute('href'))).toEqual(['https://t.me/c/123/10'])
   await click('已送达的输入 · 2')
   expect(all('.dt-disclosure-body .dt-row-title').map(title => title.textContent)).toEqual(['自动通知：CI of PR #42 at abc1234: 10 checks, 1 failed, 0 running.'])
   await click('同一发送者之前还有 1 条自动消息')
@@ -141,18 +140,18 @@ it('keeps what a person types in the Execution settings, converting it once on s
 
 it('says why an Input was not delivered on its Ticket\'s page, in either language', async () => {
   const t1 = server.ticketDetails.t1!
-  server.ticketDetails.t1 = { ...t1, stage: 'person', action: 'delivery', deliveryError: 'feishu: message recalled' }
+  server.ticketDetails.t1 = { ...t1, stage: 'person', action: 'delivery', deliveryError: 'telegram: message recalled' }
   at({ page: 'execution', id: 't1' })
   await mount()
   expect(document.querySelector('.dt-status-line .dt-stage')?.textContent).toBe(zh['stage.delivery'])
-  expect(document.querySelector('.dt-banner.dt-danger')?.textContent).toBe(`${zh.deliveryFailedPrefix}feishu: message recalled`)
+  expect(document.querySelector('.dt-banner.dt-danger')?.textContent).toBe(`${zh.deliveryFailedPrefix}telegram: message recalled`)
   expect(text()).toContain(zh.inputRetryHint)
   expect(text()).not.toContain(zh.inputWaitingHint)
   expect(document.querySelector('.dt-status-line')?.textContent).toMatch(/9月\d+日/)
   await remount(en)
   expect(document.querySelector('.dt-status-line')?.textContent).toMatch(/Sep \d+/)
   expect(document.querySelector('.dt-status-line .dt-stage')?.textContent).toBe(en['stage.delivery'])
-  expect(document.querySelector('.dt-banner.dt-danger')?.textContent).toBe(`${en.deliveryFailedPrefix}feishu: message recalled`)
+  expect(document.querySelector('.dt-banner.dt-danger')?.textContent).toBe(`${en.deliveryFailedPrefix}telegram: message recalled`)
   expect(text()).toContain(en.inputRetryHint)
 })
 
@@ -166,7 +165,7 @@ it('tells a Ticket or Thread that does not exist from a dsh-superagent that is n
   await remount()
   expect(text()).not.toContain(zh.ticketNotFound)
   expect(text()).toContain(zh.hostNotRunning)
-  at({ page: 'trigger', id: 'feishu:oc_1:om_root' })
+  at({ page: 'trigger', id: 'telegram:-100123:10' })
   await remount()
   expect(text()).not.toContain(zh.threadNotFound)
   expect(text()).toContain(zh.hostNotRunning)
@@ -179,8 +178,8 @@ it('gives a Ticket a bot\'s message started its basis, marks a Thread it follows
   basis: { facts: [{ name: 'sender', value: '评审机器人' }, { name: 'bot' }, { name: 'mode', value: 'auto' }], legacy: false },
   threads: [threadSummary(), { ...threadSummary({ key: 'github:7', title: '#7 相关 Issue' }), context: true }],
   inputs: [{ id: 'i1', kind: 'trigger', triggerId: 'e2', at: '2026-09-22T00:03:00Z', delivered: true, trigger: { id: 'e2',
-    actor: { source: 'feishu', id: MEMBER, name: { zh: 'Alice', en: 'Alice' } }, human: true, preview: '顺便加一个页面',
-    thread: 'feishu:oc_1:om_root', handback: { reason: 'Asks for a new page', at: '2026-09-22T00:05:00Z' } } }] }
+    actor: { source: 'telegram', id: MEMBER, name: { zh: 'Alice', en: 'Alice' } }, human: true, preview: '顺便加一个页面',
+    thread: 'telegram:-100123:10', handback: { reason: 'Asks for a new page', at: '2026-09-22T00:05:00Z' } } }] }
   at({ page: 'execution', id: 't1' })
   await mount()
   const facts = () => all('.dt-kv > div').map(row => [row.querySelector('dt')?.textContent, row.querySelector('dd')?.textContent])

@@ -67,13 +67,12 @@ function Result({ name, open, children }: { name: ReactNode; open: (() => void) 
 }
 function SearchResults({ result, query, onClose }: { result: SearchView; query: string; onClose: () => void }) {
   const { t, navigate } = usePanel()
-  const { setup } = usePanelData()
   const empty = !result.items.length && !result.threads.length && !result.tickets.length
   const counts = { tickets: result.tickets.length, threads: result.threads.length, items: result.items.length }
   const go = (route: Route) => () => { onClose(); navigate(route) }
   return <div className="dt-search-results" role="region" aria-label={t('searchLabel')}>
     <div className="dt-search-head">
-      <span className="dt-hint">{empty ? t(setup?.accounts?.feishu ? 'searchNone' : 'searchNoneGithub')
+      <span className="dt-hint">{empty ? t('searchNoneGithub')
         : t(result.items.length >= 20 ? 'searchFoundCapped' : 'searchFound', counts)}</span>
       <Button variant="ghost" size="sm" icon={<Icon name="close" size={14} />} aria-label={t('close')} onClick={onClose} />
     </div>

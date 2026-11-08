@@ -1,10 +1,11 @@
-/** Telegram background loop: long-polls `getUpdates`, stores each update's Trigger, and follows the Source switch. */
+/** Telegram background loop: long-polls `getUpdates`, caches each message, stores each Trigger, and follows the Source switch. */
 import { threadKey, type Trigger } from '../core/index.ts'
 import { KV } from '../kv.ts'
 import { z } from 'zod'
 import { health, type SourceContext } from './host.ts'
 import { pause } from './poll.ts'
 import { TelegramMeSchema, telegramCall, telegramToken, type TelegramMe } from './telegram-api.ts'
+import { remember, rootOfMessage } from './telegram-read.ts'
 import { SOURCE, UpdateSchema, telegramTrigger } from './telegram-trigger.ts'
 import type { TelegramConfig } from './telegram.ts'
 
@@ -20,8 +21,8 @@ async function bot(token: string, signal: AbortSignal): Promise<TelegramMe> {
   return me
 }
 
-async function receive(ctx: SourceContext, trigger: Trigger): Promise<void> {
-  await ctx.receive(trigger)
+/** Puts a Thread's label on its record, so the panel names the chat instead of its ID. */
+function describe(ctx: SourceContext, trigger: Trigger): void {
   const chat = trigger.meta.direct === true
     ? { value: { zh: '私聊', en: 'Direct message' } }
     : { value: String(trigger.meta.chatTitle ?? trigger.meta.chatId ?? 'Telegram') }
@@ -29,7 +30,7 @@ async function receive(ctx: SourceContext, trigger: Trigger): Promise<void> {
 }
 
 /**
- * Reads the updates after the stored offset, takes in each message, then advances the offset past it.
+ * Reads the updates after the stored offset, caches and takes in each message, then advances the offset past it.
  * A message that cannot be read alone is counted and skipped; the offset still moves, because replaying it would not help.
  */
 export async function pollUpdates(ctx: SourceContext, config: TelegramConfig, token: string, signal: AbortSignal): Promise<{ read: number; unreadable: number }> {
@@ -42,9 +43,16 @@ export async function pollUpdates(ctx: SourceContext, config: TelegramConfig, to
     if (signal.aborted) throw new Error('The Telegram Source stopped during the read')
     const update = UpdateSchema.safeParse(raw)
     if (!update.success) { unreadable += 1; continue }
-    const trigger = telegramTrigger(update.data, me)
+    // A reply continues the Thread its parent started, which the cache remembers across polls.
+    const trigger = telegramTrigger(update.data, me, rootOfMessage)
     // Updates read while the Source is switched off are consumed without being stored.
-    if (trigger && ctx.config<TelegramConfig>(SOURCE)) await receive(ctx, trigger)
+    if (trigger && ctx.config<TelegramConfig>(SOURCE)) {
+      remember(threadKey(trigger.threads[0]!), String(trigger.meta.chatId), { id: String(trigger.meta.messageId), from: trigger.actor.id,
+        at: trigger.at, text: trigger.text, ...(trigger.human ? {} : { bot: true as const }),
+        ...(typeof trigger.meta.parentId === 'string' ? { reply_to: trigger.meta.parentId } : {}), ...(trigger.url ? { url: trigger.url } : {}) })
+      await ctx.receive(trigger)
+      describe(ctx, trigger)
+    }
     ctx.state.set(KV.telegram.offset, update.data.update_id + 1)
   }
   return { read: updates.length, unreadable }

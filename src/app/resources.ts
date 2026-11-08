@@ -3,9 +3,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import { UserError, key, latestReport, reached, runningAssignment, threadKey, type Ticket, type Trigger } from '../core/index.ts'
 import { batchOf, inputMessage, triggerMessage, workerSessionId } from '../executor/dsh.ts'
 import { readGithub } from '../sources/github-read.ts'
-import { feishuReferences, feishuRead } from '../sources/feishu-read.ts'
-import { feishuRef } from '../sources/feishu.ts'
-import { feishuTriggerId } from '../sources/feishu-trigger.ts'
+import { cached } from '../sources/telegram-read.ts'
 import { ASSIGNMENTS, INPUTS, assignmentLine, decisionCard, decisionDetails, inputLine, newestPage, preview, textPage, threadCard, ticketCard,
   ticketDetails, triggerCard, type TicketThread } from './cards.ts'
 import { threadTitle } from './views/records.ts'
@@ -50,7 +48,7 @@ export const RESOURCES: readonly { name: string; holds: string; executor?: true 
   { name: 'prompt-preview/<id>', holds: 'a composed prompt that orchestrator_prompts_save previewed' },
   { name: 'models', holds: 'model providers, the DSH default and each role\'s model' },
   { name: 'models/<provider>', holds: 'one provider\'s models' },
-  { name: 'feishu/<trigger-id>/…', holds: 'a Feishu original, as the dsh-superagent-feishu skill describes', executor: true },
+  { name: 'telegram/<trigger-id>/thread', holds: 'the messages of a Telegram Thread this process received, oldest first', executor: true },
   { name: 'github/…', holds: 'a GitHub original, as the dsh-superagent-github skill describes', executor: true },
 ]
 export const resourceGrammar = (executor: boolean): string => RESOURCES.filter(resource => !executor || resource.executor)
@@ -66,7 +64,8 @@ export interface ResourceHost {
   promptVersion(sessionId: string): PromptVersion
   /** Whether a Session may read `revision` (the revision it currently runs under or any revision it ran under previously). */
   mayRead(sessionId: string, revision: number): boolean
-  feishuPageSize(): number
+  /** The Trigger whose message this one replies to, by its Source kind. */
+  repliesTo(trigger: Trigger): string | undefined
   sourceLink(trigger: Trigger, signal?: AbortSignal): Promise<{ source_url?: string; source_url_read?: string }>
 }
 export interface MainResourceHost extends ResourceHost {
@@ -104,7 +103,7 @@ const trigger = (host: ResourceHost, id: string, ticketId?: string): Trigger => 
 async function sourcePage(read: Read, source: string, fetch: () => Promise<unknown>) {
   const { host, resource, offset, sessionId } = read
   const body = offset === 0 ? JSON.stringify(await fetch()) : host.pages.get(`${sessionId}:${resource}`)
-  if (body === undefined) throw new Error(`Read this ${source === 'feishu' ? 'Feishu' : 'GitHub'} resource from offset 0 first`)
+  if (body === undefined) throw new Error(`Read this ${source} resource from offset 0 first`)
   if (offset === 0) host.pages.set(`${sessionId}:${resource}`, body)
   return text(read, body)
 }
@@ -199,19 +198,18 @@ const ROUTES: readonly Route[] = [
     if (!models) throw new Error('Unknown model provider')
     return list(read, (offset, count) => models.slice(offset, offset + count))
   }],
-  ['feishu/', async read => {
-    const source = trigger(read.host, read.rest.split('/')[0]!, read.ticketId)
-    const ref = feishuRef(source)
-    if (!ref) throw new Error('A Feishu source trigger is required')
-    const commands = read.host.commands.withSignal(read.signal)
-    return sourcePage(read, 'feishu', () => feishuRead(commands, ref, read.resource, read.host.feishuPageSize()))
+  ['telegram/', async read => {
+    const found = trigger(read.host, read.rest.split('/')[0]!, read.ticketId)
+    const ref = found.threads[0]
+    if (found.source !== 'telegram' || !ref) throw new Error('A Telegram source trigger is required')
+    return sourcePage(read, 'telegram', async () => ({ status: 'available', messages: cached(threadKey(ref)) }))
   }],
   ['github/', read => sourcePage(read, 'github', () => readGithub(read.host.commands.withSignal(read.signal), read.resource))],
   ['trigger/', async read => {
     const { host, rest, ticketId, offset, signal } = read
     if (!rest || rest.includes('/')) throw new Error('Unknown context resource')
     const found = trigger(host, rest, ticketId)
-    const ref = feishuRef(found)
+    const ref = found.source === 'telegram' ? { triggerId: found.id } : undefined
     // Redact decision IDs, other tickets, and unreachable neighbour triggers when a worker session reads a trigger.
     const ticket = ticketId ? host.store.tickets.get(ticketId) : undefined
     const shown = (item: Trigger | undefined) => item && (!ticket || readable(host, ticket, item)) ? item : undefined
@@ -220,12 +218,12 @@ const ROUTES: readonly Route[] = [
       : disposition
     // Omit card preview and self-reference because this resource returns the full text.
     const { preview: _preview, chars: _chars, read: _read, ...card } = triggerCard(found, visible)
-    const parent = found.source === 'feishu' && typeof found.meta.parentId === 'string' ? found.meta.parentId : undefined
-    const repliedTo = shown(parent ? host.store.triggers.get(feishuTriggerId(parent)) : undefined)
+    const parent = host.repliesTo(found)
+    const repliedTo = shown(parent ? host.store.triggers.get(parent) : undefined)
     const neighbours = host.store.read.neighbours(threadKey(found.threads[0]!), found.at, found.id)
     const around = { before: shown(neighbours.before), after: shown(neighbours.after) }
     return { ...card, ...await host.sourceLink(found, signal), acknowledgement: host.store.replyStatus(key('ack', found.id)) ?? 'not_requested',
-      ...(ref ? { context: feishuReferences(ref) } : {}),
+      ...(ref ? { context: { skill: 'dsh-superagent-telegram', thread: `telegram/${found.id}/thread` } } : {}),
       ...(offset === 0 ? {
         ...repliedTo ? { replied_to: triggerLine(repliedTo) } : {},
         around: { ...around.before ? { before: triggerLine(around.before) } : {}, ...around.after ? { after: triggerLine(around.after) } : {} },

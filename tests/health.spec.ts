@@ -1,11 +1,10 @@
 /** Runtime health reporting: per-component error states and recovery on subsequent success. */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { Commands } from '../src/infra/commands.ts'
-import { feishu, startRuntime, type Host } from './fixtures/host.ts'
+import { startRuntime, telegram, type Host } from './fixtures/host.ts'
 
 let h: Host
 beforeEach(async () => { h = await startRuntime() })
-afterEach(async () => { await h.stop() })
+afterEach(async () => { await h.stop(); vi.unstubAllGlobals(); delete process.env.TELEGRAM_BOT_TOKEN })
 
 /** Advance fake `Date.now()` by `ms` and pump due runtime work. */
 async function at(ms: number) {
@@ -29,19 +28,21 @@ it('reports a relay in error once it failed three times, clears it once the rela
 
 it('keeps a failing relay\'s error while replies recover, and a failing reply\'s error while relays recover', async () => {
   const master = h.agents.get(h.runtime.masterId)!
-  const lark = vi.mocked(Commands.prototype.lark)
-  const reply = (id: string) => { h.runtime.outbox.send({ id, channel: feishu('9', 'x').channel!, text: '已合并。', kind: 'notice' }) }
+  const send = vi.fn()
+  vi.stubGlobal('fetch', send)
+  process.env.TELEGRAM_BOT_TOKEN = 'test-token'
+  const reply = (id: string) => { h.runtime.outbox.send({ id, channel: telegram('9', 'x').channel!, text: '已合并。', kind: 'notice' }) }
   master.steer.mockImplementation(() => { throw new Error('master gone') })
   h.runtime.sessions.relay('r2', JSON.stringify({ kind: 'note' }))
-  lark.mockRejectedValue(new Error('internal error (2200)'))
+  send.mockRejectedValue(new Error('internal error (2200)'))
   reply('stuck')
   // Each fails three times in a row: the relay after 0, 2 and 6 seconds, the reply after 0, 5 and 15.
   await h.runtime.idle(); await at(5000); await at(15_000)
   expect(h.runtime.health).toMatchObject({ relay: { state: 'error' }, reply: { state: 'error', detail: expect.stringContaining('2200') } })
-  lark.mockResolvedValue({})
+  send.mockResolvedValue({ status: 200, json: async () => ({ ok: true, result: {} }) })
   await at(35_000)
   expect(h.runtime.health).toMatchObject({ relay: { state: 'error' }, reply: { state: 'ready' } })
-  lark.mockRejectedValue(new Error('internal error (2200)'))
+  send.mockRejectedValue(new Error('internal error (2200)'))
   reply('stuck-2')
   master.steer.mockImplementation(() => {})
   await h.runtime.idle(); await at(50_000); await at(70_000)

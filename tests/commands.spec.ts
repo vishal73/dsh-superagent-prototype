@@ -1,16 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { CliError, Commands, commandError } from '../src/infra/commands.ts'
-import { feishuKind } from '../src/sources/feishu.ts'
-import { feishuChannel } from '../src/sources/feishu-trigger.ts'
 import { githubKind } from '../src/sources/github.ts'
 import { githubChannel } from '../src/sources/github-trigger.ts'
 import { SourceRegistry } from '../src/sources/registry.ts'
 import { SettingsSchema } from '../src/policy.ts'
-import { key, type OutboundMessage } from '../src/core/index.ts'
+import type { OutboundMessage } from '../src/core/index.ts'
 import { testDeployment } from './fixtures/deployment.ts'
 const sources = new SourceRegistry(() => SettingsSchema.parse({}))
-sources.register(feishuKind); sources.register(githubKind)
+sources.register(githubKind)
 const send = (commands: Commands, message: OutboundMessage) => sources.send(message, commands)
 const deployment = testDeployment({ github: { ...testDeployment().github, cli: '/path/agent-gh' } })
 const REPOSITORY = deployment.repository
@@ -28,9 +26,6 @@ describe('account-isolated operations', () => {
       expect(output).toContain('DSH_SUPERAGENT_PROBE=agent')
       expect(output).not.toContain('GH_TOKEN=')
     } finally { delete process.env.GH_TOKEN }
-  })
-  it('refuses Feishu commands when the deployment has no Feishu bot', async () => {
-    await expect(new Commands(() => testDeployment({ feishu: undefined }), {}, new AbortController().signal).lark(['im', '+chat-list'])).rejects.toThrow('The Feishu Source has no working bot CLI')
   })
   it('reconciles an uncertain GitHub send with its stable marker', async () => {
     const commands = new Commands(() => deployment, {}, new AbortController().signal)
@@ -53,42 +48,15 @@ describe('account-isolated operations', () => {
     await send(commands, { ...reply, channel: githubChannel(8, `https://github.com/${REPOSITORY}/pull/8#discussion_r7`) })
     expect(gh.mock.calls[1]![0]).toEqual(['api', `repos/${REPOSITORY}/pulls/8/comments/3/replies`, '--method', 'POST', '-f', expect.stringContaining('Done')])
   })
-  it('uses Feishu bot identity and one idempotency key on retries', async () => {
-    const commands = new Commands(() => deployment, {}, new AbortController().signal); const run = vi.spyOn(commands,'run').mockResolvedValue('{"ok":true,"data":{}}')
-    await send(commands, { ...reply, channel: feishuChannel('oc_1', 'om_1') })
-    expect(run.mock.calls[0]![1]).toEqual(expect.arrayContaining(['--as','bot','--idempotency-key','stable-operation','--message-id','om_1']))
-  })
 })
 
-it('reports Feishu failures with their code and without command arguments', () => {
+it('reports a CLI\'s JSON error with its code and without command arguments', () => {
   const membership = commandError({stderr:'[page 1] fetching...\n'+JSON.stringify({error:{code:232011,message:'operator is not in the chat'}})})
   expect(membership).toMatchObject({ message: 'operator is not in the chat (232011)', code: 232011 })
   expect(commandError({stderr:JSON.stringify({error:{code:999,message:'scope missing'}})}).message).toBe('scope missing (999)')
 })
 describe('Channels', () => {
   const commands = () => new Commands(() => deployment, {}, new AbortController().signal)
-  const feishu = { ...reply, channel: feishuChannel('oc_1', 'om_1') }
-  const lark = (code: number, message: string) => commandError({ stderr: JSON.stringify({ error: { code, message } }), code: 1 })
-  it('drop a Feishu reply to a recalled message or one Feishu no longer finds, and say how to add the bot to a chat', async () => {
-    const value = commands()
-    const run = vi.spyOn(value, 'run')
-    for (const [code, message] of [[230011, 'The message is recalled'], [230001, 'message not found'], [231003,
-      'The message is withdrawn']] as const) {
-      run.mockRejectedValueOnce(lark(code, message))
-      expect(await send(value, feishu)).toBe('gone')
-    }
-    run.mockRejectedValueOnce(lark(232011, 'operator is not in the chat'))
-    const hint = 'The Feishu bot is not a member of the chat. Add the bot in the chat settings, then retry.'
-    await expect(send(value, feishu)).rejects.toThrow(hint)
-    run.mockRejectedValueOnce(lark(99991400, 'rate limited'))
-    await expect(send(value, feishu)).rejects.toThrow('rate limited (99991400)')
-  })
-  it('keep a Feishu reply whose command timed out for a retry, whatever its text says', async () => {
-    const value = commands()
-    const timedOut = { killed: true, signal: 'SIGTERM', code: null, stderr: '', message: 'Command failed: lark-bot --markdown withdrawn' }
-    vi.spyOn(value, 'run').mockRejectedValueOnce(commandError(timedOut, 'lark-bot'))
-    await expect(send(value, { ...feishu, text: 'The change was withdrawn' })).rejects.toThrow('lark-bot timed out after 90 s')
-  })
   it('drop a GitHub reply to an Issue that is deleted or locked, and keep others for a retry', async () => {
     const value = commands()
     vi.spyOn(value, 'pages').mockResolvedValue([])
@@ -113,17 +81,14 @@ describe('Channels', () => {
     const post = ['api', `repos/${REPOSITORY}/issues/8/comments`, '--method', 'POST', '-f', expect.stringContaining('Done')]
     expect(gh.mock.calls[1]![0]).toEqual(post)
   })
-  it('link each address to its page with its label', () => {
-    const links = { repository: REPOSITORY, feishu: deployment.feishu! }
+  it('links each address to its page with its label', () => {
+    const links = { repository: REPOSITORY }
     expect(githubKind.channel!.link(githubChannel(8).address, links)).toEqual({ url: `https://github.com/${REPOSITORY}/issues/8`,
       label: { zh: 'GitHub #8', en: 'GitHub #8' } })
     const review = `https://github.com/${REPOSITORY}/pull/8#discussion_r7`
     expect(githubKind.channel!.link(githubChannel(8, review).address, links))
       .toEqual({ url: review, label: { zh: 'GitHub #8 的 review 讨论', en: 'Review discussion on GitHub #8' } })
     expect(githubKind.channel!.link(githubChannel(8).address, {}).url).toBe('')
-    const message = feishuChannel('oc_1', 'om_1').address
-    expect(feishuKind.channel!.link(message, links)).toEqual({ url: 'https://applink.feishu.cn/client/chat/open?openChatId=oc_1',
-      label: { zh: '飞书消息', en: 'Feishu message' }, triggerId: key('feishu', 'om_1') })
   })
 })
 
@@ -160,15 +125,6 @@ describe('GitHub calls', () => {
     await expect(value.pages(z.looseObject({ id: z.number() }), 'issues/12/comments')).rejects.toThrow()
   })
 })
-it('says how to add the bot to a chat when Feishu answers that it is not a member, and keeps the code', async () => {
-  const commands = new Commands(() => deployment, {}, new AbortController().signal)
-  const membership = JSON.stringify({ error: { code: 232011, message: 'operator is not in the chat' } })
-  const run = vi.spyOn(commands, 'run').mockRejectedValueOnce(commandError({ stderr: membership, code: 1 }))
-  const hint = 'The Feishu bot is not a member of the chat. Add the bot in the chat settings, then retry.'
-  await expect(commands.lark(['im', '+chat-members-list'])).rejects.toMatchObject({ message: hint, code: 232011, exitCode: 1 })
-  run.mockResolvedValueOnce(JSON.stringify({ ok: false, error: { code: 232011, message: 'operator is not in the chat' } }))
-  await expect(commands.lark(['im', '+chat-members-list'])).rejects.toMatchObject({ message: hint, code: 232011 })
-})
 it('names only the program and how it ended when a command prints no diagnostics, never its arguments', async () => {
   const commands = new Commands(() => deployment, {}, new AbortController().signal)
   const secret = 'secret reply text'
@@ -177,9 +133,9 @@ it('names only the program and how it ended when a command prints no diagnostics
   await expect(commands.run('/no/such/program', ['secret reply text'])).rejects.toMatchObject({ message: 'program could not run: ENOENT' })
   // Timeouts kill the child with SIGTERM; Node's default error message would echo every argument.
   const timedOut = { killed: true, signal: 'SIGTERM', code: null, stderr: '',
-    message: 'Command failed: /path/lark-bot im +messages-reply --markdown withdrawn' }
-  expect(commandError(timedOut, '/path/lark-bot')).toMatchObject({ message: 'lark-bot timed out after 90 s' })
-  expect(String(commandError(timedOut, '/path/lark-bot'))).not.toContain('withdrawn')
+    message: 'Command failed: /path/agent-gh issue comment --body withdrawn' }
+  expect(commandError(timedOut, '/path/agent-gh')).toMatchObject({ message: 'agent-gh timed out after 90 s' })
+  expect(String(commandError(timedOut, '/path/agent-gh'))).not.toContain('withdrawn')
 })
 it('reports failures as CliError with the code the CLI names and the exit status', async () => {
   const notFound = commandError({ stderr: 'gh: Not Found (HTTP 404)\n', code: 1 })
@@ -194,9 +150,6 @@ it('reports failures as CliError with the code the CLI names and the exit status
   const running = new Commands(() => deployment, {}, controller.signal).run('sleep', ['5'])
   controller.abort()
   await expect(running).rejects.toMatchObject({ name: 'AbortError' })
-  const commands = new Commands(() => deployment, {}, new AbortController().signal)
-  vi.spyOn(commands, 'run').mockResolvedValue(JSON.stringify({ ok: false, error: { code: 231003, message: 'message not found' } }))
-  await expect(commands.lark(['im', '+messages-reply'])).rejects.toMatchObject({ message: 'message not found (231003)', code: 231003 })
 })
 
 it('stops a running command when the signal of its work aborts, or the lifetime, and leaves the other work running', async () => {

@@ -11,7 +11,7 @@ function passes(closing = () => false) {
   const value = new Passes({ engine, effects, health, lifetime: new AbortController().signal, configured: () => true, closing })
   return { passes: value, engine, effects, health }
 }
-const trigger = { id: 't1', source: 'feishu', threads: [{ source: 'feishu', id: 'oc_1:om_1' }], actor: { source: 'feishu', id: 'ou_a' }, human: true,
+const trigger = { id: 't1', source: 'telegram', threads: [{ source: 'telegram', id: 'oc_1:om_1' }], actor: { source: 'telegram', id: 'ou_a' }, human: true,
   at: '2026-10-01T00:00:00.000Z', text: 'hi', meta: {} } as Trigger
 
 it('reports a failed pass as an error of the runtime, which the next pass that succeeds clears', async () => {

@@ -1,4 +1,4 @@
-/** Subprocess wrapper for running gh, lark-cli, and git commands under the deployment's configured accounts. */
+/** Subprocess wrapper for running gh and git commands under the deployment's configured accounts. */
 import { execFile } from 'node:child_process'
 import { basename } from 'node:path'
 import { promisify } from 'node:util'
@@ -46,14 +46,8 @@ export function validItems<T>(item: z.ZodType<T>, list: readonly unknown[], tall
   if (tally) tally.skipped += list.length - items.length
   return items
 }
-/** Rewrites Feishu error 232011 (bot not in chat) with remediation instructions. */
-function membership(error: unknown): unknown {
-  if (!(error instanceof CliError) || error.code !== 232011) return error
-  const hint = 'The Feishu bot is not a member of the chat. Add the bot in the chat settings, then retry.'
-  return new CliError(hint, error.code, error.exitCode)
-}
 /**
- * Executes gh, lark-cli, and git subprocesses with deployment account credentials, timeouts, and abort signals.
+ * Executes gh and git subprocesses with deployment account credentials, timeouts, and abort signals.
  * Restricts GitHub API calls to the configured repository and translates CLI failures into CliError instances for Sources, MasterAssessor, Outbox, and Settings.
  */
 export class Commands {
@@ -95,20 +89,6 @@ export class Commands {
     const outside = /^\/|^[a-z]+:|(^|\/)\.\.?(\/|\?|$)/i.test(path)
     if (outside) throw new Error('GitHub calls are restricted to the configured repository')
     return path ? `repos/${this.repository}/${path}` : `repos/${this.repository}`
-  }
-  /**
-   * Runs the Feishu bot's `lark-cli` and returns the JSON `data` payload.
-   * @throws CliError with Feishu's error code on failure (rewriting 232011 when the bot is not in the chat).
-   */
-  async lark<T>(args: string[], cwd?: string): Promise<T> {
-    const bot = this.deployment.feishu
-    if (!bot) throw new Error('The Feishu Source has no working bot CLI')
-    const output = await this.run(bot.cli, [...args, '--as', 'bot', '--format', 'json'], cwd)
-      .catch((error: unknown) => { throw membership(error) })
-    const result = JSON.parse(output) as { ok: boolean; data: T; error?: { code?: number; message?: string } }
-    const code = result.error?.code
-    if (!result.ok) throw membership(new CliError(`${result.error?.message ?? 'Feishu command failed'}${code ? ` (${code})` : ''}`, code))
-    return result.data
   }
   /** Runs `git` on PATH using the agent's isolated git environment and credential helper. */
   async git(args: string[], cwd: string): Promise<string> { return this.run('git', args, cwd) }

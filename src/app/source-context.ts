@@ -20,8 +20,6 @@ export interface SourceContextDeps {
   configured(): boolean
   /** Setup problem whose `place` matches the Source kind receives it on `context.problem`. */
   readonly setupProblem?: SetupProblem | undefined
-  /** Why setup found no Feishu bot even though the Feishu Source names a CLI. */
-  readonly feishuProblem?: SetupProblem | undefined
   /** Hands a Trigger to the Engine and schedules the pass that assesses it. */
   receive(trigger: Trigger): ReceiveResult | Promise<ReceiveResult>
 }
@@ -38,7 +36,7 @@ export function sourceContextOf(deps: SourceContextDeps, kind: { kind: string; h
     commands: deps.commands,
     ready: deps.ready,
     configured: () => deps.configured(),
-    get problem() { return [deps.feishuProblem, deps.setupProblem].find(problem => problem?.place === kind.kind) },
+    get problem() { return deps.setupProblem?.place === kind.kind ? deps.setupProblem : undefined },
     config: <C extends Record<string, unknown>>(id: string) => {
       const instance = deps.sources.instance<C>(id)
       return instance?.enabled ? instance.config : undefined

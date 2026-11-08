@@ -15,22 +15,25 @@ import type { DroppedReply, HistoryView, Problem, PromptsView, SetupView, Source
 import { SETUP_FIELDS } from '../../src/deployment.ts'
 import { EvalConfigSchema, ExecutorConfigSchema, PolicyConfigSchema, SettingsSchema } from '../../src/policy.ts'
 import { SetupError, type SetupCode } from '../../src/setup.ts'
-import { feishuChannel } from '../../src/sources/feishu-trigger.ts'
 import { githubChannel } from '../../src/sources/github-trigger.ts'
-import { feishuKind } from '../../src/sources/feishu.ts'
+import { telegramChannel } from '../../src/sources/telegram-trigger.ts'
 import { githubKind } from '../../src/sources/github.ts'
+import { telegramKind } from '../../src/sources/telegram.ts'
 import type { Health } from '../../src/sources/host.ts'
 import type { SourceKind } from '../../src/sources/kind.ts'
 import { testDeployment } from './deployment.ts'
 
-export const MEMBER = 'ou_alice'
-const ALLOWED: Record<string, { id: string; name?: string }[]> = { feishu: [{ id: MEMBER, name: 'Alice' }], github: [{ id: 'alice' }] }
+export const MEMBER = '42'
+/** The listened Telegram supergroup and the root message of the fixture Thread. */
+export const CHAT = '-100123'
+export const ROOT = '10'
+const ALLOWED: Record<string, { id: string; name?: string }[]> = { telegram: [{ id: MEMBER, name: 'Alice' }], github: [{ id: 'alice' }] }
 type Actor = TriggerRow['actor']
 /** Resolve an actor display label using the fixture policy's allowed list or the source kind's unnamed fallback. */
 export function actor(source: string, id: string, human = true): Actor {
   if (!id) return { source, id }
   const entry = ALLOWED[source]?.find(item => item.id.toLowerCase() === id.toLowerCase())
-  const unnamed = source === 'feishu' ? feishuKind.policy?.unnamed : undefined
+  const unnamed = source === 'telegram' ? telegramKind.policy?.unnamed : undefined
   const name = entry ? entry.name || entry.id : unnamed ? undefined : id
   return { source, id, name: name ? { zh: name, en: name } : human ? unnamed!.person : unnamed!.bot }
 }
@@ -45,15 +48,15 @@ const TICKET = {
 export const ticketSummary = (fields: Partial<TicketFields> = {}, stage: TicketStage = { stage: 'working' }): TicketRow =>
   ({ ...TICKET, ...fields, ...stage })
 export const threadSummary = (fields: Partial<ThreadRow> = {}): ThreadRow => ({
-  key: 'feishu:oc_1:om_root', source: 'feishu', title: '这个文案好奇怪', stage: 'subscribed', latest: undefined, lastAt: '2026-09-23T00:00:00Z',
+  key: `telegram:${CHAT}:${ROOT}`, source: 'telegram', title: '这个文案好奇怪', stage: 'subscribed', latest: undefined, lastAt: '2026-09-23T00:00:00Z',
   createdAt: '2026-09-22T00:00:00Z', subscriptions: 1, tickets: [{ id: 't1', title: '修复回归', state: 'open' }], evaluating: undefined,
   pending: 0, pollError: undefined, url: undefined, facts: { chat: { value: '团队群' } }, ...fields,
 })
 type TriggerFields = Partial<Omit<TriggerRow, 'disposition' | 'actions'>> & { disposition?: Partial<TriggerRow['disposition']> }
 /** Build a trigger row on the default thread and compute `actions.requeue` using the host's eligibility rules. */
 export function trigger(id: string, at: string, { disposition, ...fields }: TriggerFields = {}): TriggerRow {
-  const row = { id, source: 'feishu', actor: actor('feishu', MEMBER), human: true, at, text: `message ${id}`, preview: `message ${id}`,
-    url: undefined, threads: ['feishu:oc_1:om_root'], ...fields,
+  const row = { id, source: 'telegram', actor: actor('telegram', MEMBER), human: true, at, text: `message ${id}`, preview: `message ${id}`,
+    url: undefined, threads: [`telegram:${CHAT}:${ROOT}`], ...fields,
     disposition: { queued: false, evaluating: false, delivered: false, filtered: undefined, fanout: [], handbacks: [], decision: undefined,
       ...disposition } }
   return { ...row, actions: { requeue: requeueable(row) } }
@@ -68,18 +71,18 @@ export function found(id: string, at: string, { threadTitle, filtered,
 }
 export const promptVersion = (revision: number, config: PromptsView['current']['config']): PromptsView['current'] =>
   ({ revision, previousRevision: revision ? revision - 1 : null, savedAt: '', source: 'panel', config })
-/** Build a dropped outbound reply fixture (`feishu` replies to `oc_1`/`om_root`; `github` comments on PR #42). */
-export const droppedReply = (id: string, hoursAgo: number, source: 'feishu' | 'github', reason: DroppedReply['dropped']['reason'],
+/** Build a dropped outbound reply fixture (`telegram` replies to a chat message; `github` comments on PR #42). */
+export const droppedReply = (id: string, hoursAgo: number, source: 'telegram' | 'github', reason: DroppedReply['dropped']['reason'],
   { ticket, thread }: { ticket?: DroppedReply['ticket']; thread?: false } = {}): DroppedReply => ({
   id, preview: `Reply ${id}`, kind: 'reply',
-  channel: source === 'feishu' ? feishuChannel('oc_1', 'om_root') : githubChannel(42),
+  channel: source === 'telegram' ? telegramChannel(CHAT, ROOT) : githubChannel(42),
   dropped: { at: new Date(Date.now() - hoursAgo * 3_600_000).toISOString(), reason }, ...ticket ? { ticket } : {},
-  ...thread === false ? {} : { thread: source === 'feishu' ? 'feishu:oc_1:om_root' : 'github:42' },
+  ...thread === false ? {} : { thread: source === 'telegram' ? `telegram:${CHAT}:${ROOT}` : 'github:42' },
 })
 const dayAgo = () => new Date(Date.now() - 86_400_000).toISOString()
 export const problemOf = (code: SetupCode, values: Record<string, string> = {}) => new SetupError(code, values).problem
 // The kinds' configurations differ, and the fake reads them only as the records the views carry.
-const KINDS = [feishuKind, githubKind] as unknown as SourceKind[]
+const KINDS = [telegramKind, githubKind] as unknown as SourceKind[]
 export const MACHINE = { stateDir: '/srv/dsh-superagent', promptMaxChars: 100000, admissionContextMaxPages: 10,
   admissionContextTimeoutMs: 15000 }
 
@@ -113,18 +116,16 @@ export let server: PanelServer
 
 function resolved() {
   const accounts = server.setup.accounts
-  return accounts ? testDeployment({ repository: accounts.repository, github: { cli: '/bin/false', login: accounts.agent, noreply: '' },
-    ...accounts.feishu ? { feishu: { cli: '/bin/false', ...accounts.feishu } } : { feishu: undefined } }) : undefined
+  return accounts ? testDeployment({ repository: accounts.repository, github: { cli: '/bin/false', login: accounts.agent, noreply: '' } }) : undefined
 }
-/** Default source health: paused during setup; Feishu defaults to `socket closed` unless overridden or paused by setup. */
+/** Default source health: paused during setup; Telegram defaults to a failed poll unless overridden. */
 function healthOf(name: string): Health {
   if (server.setup.problem) return { state: 'paused', detail: 'Waiting for setup', code: 'setupPending' }
   if (server.health[name]) return server.health[name]
-  if (name !== 'feishu') return { state: 'ready', detail: '' }
-  return server.setup.feishuProblem ? { state: 'paused', detail: server.setup.feishuProblem.detail } : { state: 'error',
-    detail: 'socket closed' }
+  if (name !== 'telegram') return { state: 'ready', detail: '' }
+  return { state: 'error', detail: 'getUpdates failed: ETIMEDOUT' }
 }
-const problemOf_ = (id: string) => [server.setup.problem, server.setup.feishuProblem].find(item => item?.place === id) ?? undefined
+const problemOf_ = (id: string) => server.setup.problem?.place === id ? server.setup.problem : undefined
 function sourceSettings(): SourceView[] {
   return KINDS.map(kind => {
     const config = kind.schema.parse(server.settings.sources[kind.kind]?.config ?? {})
@@ -138,7 +139,7 @@ function sourceSettings(): SourceView[] {
       value: { enabled: server.settings.sources[kind.kind]?.enabled ?? true, config },
         revision: server.revisions[`source:${kind.kind}`] ?? 0,
       restarts: SETUP_FIELDS[kind.kind] ?? [], fields: kind.fields, facts: kind.facts?.(resolved()) ?? {},
-      labels: kind.kind === 'feishu' ? { oc_team: '团队群', oc_other: '另一个群', ...server.joined } : {}, ...problem ? { problem } : {},
+      labels: {}, ...problem ? { problem } : {},
       ...policy ? { policy } : {} }
   })
 }
@@ -149,10 +150,10 @@ function sourceStatuses(): SourceStatusRow[] {
     const problem = problemOf_(kind.kind)
     const state = !enabled ? 'off' : problem || health.some(item => item.state === 'error') ? 'error' : server.setup.problem ? 'setup'
       : health.some(item => item.state === 'starting') ? 'starting' : health.some(item => item.state === 'paused') ? 'paused' : 'ready'
-    const feishu = kind.kind === 'feishu'
+    const telegram = kind.kind === 'telegram'
     return { id: kind.kind, title: kind.title, installed: true, enabled, state, health, ...problem ? { problem } : {},
-      stats: { received: feishu ? 12 : 0, filtered: feishu ? 2 : 0, lastAt: '2026-09-23T00:00:00Z' },
-      filtered: feishu ? [] : [{ id: 'e9', at: '2026-09-23T00:02:00Z', actor: actor('github', 'someone'), preview: 'looks wrong',
+      stats: { received: telegram ? 12 : 0, filtered: telegram ? 2 : 0, lastAt: '2026-09-23T00:00:00Z' },
+      filtered: telegram ? [] : [{ id: 'e9', at: '2026-09-23T00:02:00Z', actor: actor('github', 'someone'), preview: 'looks wrong',
         reason: { code: 'source_disabled' } }],
       dropped: server.dropped.filter(item => item.channel.source === kind.kind && item.dropped.at >= dayAgo()) }
   })
@@ -177,14 +178,13 @@ const settingsView = (): ApiResponse<'GET settings'> => ({
       en: 'Repository' } }] }] },
 })
 const overviewView = (): ApiResponse<'GET overview'> => {
-  const { problem, feishuProblem } = server.setup
-  const setup = problem ?? feishuProblem
+  const { problem } = server.setup
   return {
-    problems: [...setup ? [{ kind: 'setup' as const, ...setup }] : [],
+    problems: [...problem ? [{ kind: 'setup' as const, ...problem }] : [],
       ...KINDS.some(kind => server.settings.sources[kind.kind]?.enabled !== false) ? [] : [{ kind: 'no-source' as const }],
-      ...feishuProblem || server.settings.sources.feishu?.enabled === false ? [] : [{ kind: 'source-error' as const, source: { id: 'feishu',
-        title: { zh: '飞书', en: 'Feishu' },
-        health: { name: 'feishu', state: 'error' as const, detail: 'socket closed' } } }],
+      ...problem || server.settings.sources.telegram?.enabled === false ? [] : [{ kind: 'source-error' as const, source: { id: 'telegram',
+        title: { zh: 'Telegram', en: 'Telegram' },
+        health: { name: 'telegram', ...healthOf('telegram') } } }],
       ...server.threads.filter(thread => thread.evaluating && thread.evaluating.deadline < new Date().toISOString())
         .map(thread => ({ kind: 'eval-overdue' as const, thread })),
       { kind: 'eval-unavailable' as const, decisionId: 'u1', thread: threadSummary(), reason: [{ code: 'timeout' }], triggerId: 'e3' },
@@ -203,22 +203,21 @@ const overviewView = (): ApiResponse<'GET overview'> => {
 }
 export const acceptDecision = (): NonNullable<TicketPageView['decision']> => ({ id: 'd1', kind: 'accept', outcome: 'accept',
   reason: [{ code: 'explicitRouted' }], at: '2026-09-22T00:00:00Z', strength: 'explicit', ticketId: undefined,
-  triggerIds: ['e1'], thread: 'feishu:oc_1:om_root', rules: [], preview: '@bot 修一下', ticketTitle: undefined })
+  triggerIds: ['e1'], thread: `telegram:${CHAT}:${ROOT}`, rules: [], preview: '@widgets_bot 修一下', ticketTitle: undefined })
 const ticketDetail = (): TicketPageView => ({
   ...ticketSummary(), paused: false, decision: acceptDecision(), threads: [threadSummary()],
   mandate: { strength: 'explicit', policyVersion: 'abcdef1234567890', basis: { via: 'addressed', sender: 'Alice', addressed: 'mention' },
-    actor: actor('feishu', MEMBER), scope: '修复登录页回归' },
+    actor: actor('telegram', MEMBER), scope: '修复登录页回归' },
   basis: { facts: [{ name: 'sender', value: 'Alice' }, { name: 'addressed', value: 'mention' }], legacy: false },
   environment: [{ key: 'DSH_SUPERAGENT_DIR', value: '/w/t1', description: { zh: '执行目录', en: 'Directory' }, owner: 'executor' },
     { key: 'DSH_SUPERAGENT_GITHUB_NUMBER', value: '', description: { zh: '编号', en: 'Number' }, owner: 'github' }],
-  channels: [{ source: 'feishu', url: 'https://applink.feishu.cn/client/chat/open?openChatId=oc_1', label: { zh: '飞书消息',
-    en: 'Feishu message' } },
+  channels: [{ source: 'telegram', url: 'https://t.me/c/123/10', label: { zh: 'Telegram 消息', en: 'Telegram message' } },
     { source: 'github', url: 'https://github.com/acme/widgets/issues/42', label: { zh: 'GitHub #42', en: 'GitHub #42' } }],
   assignments: [{ id: 'a1', state: 'running', createdAt: '2026-09-22T00:00:00Z',
     startedAt: '2026-09-22T00:01:00Z',
     report: { state: 'progress', summary: 'working', at: '2026-09-22T00:02:00Z' } }],
   inputs: [{ id: 'i1', kind: 'trigger', triggerId: 'e2', at: '2026-09-22T00:03:00Z', delivered: false,
-    trigger: { id: 'e2', actor: actor('feishu', MEMBER), human: true, preview: '顺便改标题', thread: 'feishu:oc_1:om_root' } },
+    trigger: { id: 'e2', actor: actor('telegram', MEMBER), human: true, preview: '顺便改标题', thread: `telegram:${CHAT}:${ROOT}` } },
   { id: 'i2', kind: 'policy-changed', at: '2026-09-22T00:04:00Z', delivered: true, from: 'aaaaaaaaaaaaaaaa', to: 'bbbbbbbbbbbbbbbb' }],
 })
 function threadPage(key: string, { before, around }: { before?: string; around?: string }): ThreadPageView | undefined {
@@ -233,26 +232,22 @@ function threadPage(key: string, { before, around }: { before?: string; around?:
 }
 function initial(): PanelServer {
   const settings = SettingsSchema.parse({
-    policy: { sources: { feishu: { allowed: [{ id: 'ou_alice', name: 'Alice' }], syncChat: 'oc_team' },
-      github: { allowed: [{ id: 'alice' }] } },
+    policy: { sources: { telegram: { allowed: [{ id: MEMBER, name: 'Alice' }] }, github: { allowed: [{ id: 'alice' }] } },
       rules: [{ id: 'copy', name: '文案修改', enabled: true, instruction: '修正明确的文案错误' }] },
-    sources: { feishu: { enabled: true, config: { cli: 'lark-bot', chats: [{ chatId: 'oc_team', listen: 'mentions' }],
-      directMessages: true } },
+    sources: { telegram: { enabled: true, config: { chats: [{ chatId: CHAT, listen: 'mentions' }], directMessages: true } },
       github: { enabled: true, config: { repository: 'acme/widgets', cli: 'gh-agent' } } },
     executor: { blockedCommands: ['gh-personal'] },
   })
   const ended = ticketSummary({ id: 't0', title: '旧工单', state: 'ended', actions: { retry: false, stop: false },
     ended: { at: '2026-09-21T00:00:00Z', by: 'human', reason: 'Human asked to stop', outcome: 'stopped' } }, { stage: 'ended' })
-  const reply = { source: 'feishu', url: 'https://applink.feishu.cn/client/chat/open?openChatId=oc_1', label: { zh: '飞书消息',
-    en: 'Feishu message' } }
+  const reply = { source: 'telegram', url: 'https://t.me/c/123/10', label: { zh: 'Telegram 消息', en: 'Telegram message' } }
   const defaults = { revision: 0, previousRevision: null, savedAt: '', source: 'defaults' }
   return {
     health: {}, down: false, pending: 0, opened: [], requests: [], misuse: [], queued: new Set(), dropped: [], failing: [],
-    setup: { machine: MACHINE, problem: null, feishuProblem: null,
-      accounts: { repository: 'acme/widgets', agent: 'agent-bot', feishu: { appId: 'cli_bot', brand: 'feishu', botId: 'ou_bot',
-        name: 'Widgets Bot' } } },
+    setup: { machine: MACHINE, problem: null,
+      accounts: { repository: 'acme/widgets', agent: 'agent-bot' } },
     settings, revisions: { policy: 3, eval: 1, executor: 0 },
-    prompts: { masterId: 'master', sections: TEAM_SECTIONS, skillName: SKILL_NAME.source, builtin: ['feishu', 'github'],
+    prompts: { masterId: 'master', sections: TEAM_SECTIONS, skillName: SKILL_NAME.source, builtin: ['telegram', 'github'],
       skillPrefix: SKILL_PREFIX, revision: 0, current: { ...defaults, config: defaultPrompts() },
       defaults: defaultPrompts(), parts: Object.entries(builtInParts()).map(([key, part]) => ({ key, ...part, base: builtInBase(part.text) })),
       defaultChanged: [], revisions: [{ ...defaults, changed: [] }], sessions: [], notificationPending: false, next_offset: null },
@@ -266,13 +261,13 @@ function initial(): PanelServer {
     search: { items: [], threads: [] },
     history: { current: 3, policyVersion: 'abcdef1234567890', items: [
       { revision: 4, savedAt: '2026-09-23T00:00:00Z', source: 'panel', policyVersion: '9876543210fedcba', policyChanged: true, notified: [],
-        block: 'source:feishu',
-        changes: [{ code: 'sourceRowsAdded', source: 'feishu', field: 'chats', items: ['oc_team'] }] },
+        block: 'source:telegram',
+        changes: [{ code: 'sourceRowsAdded', source: 'telegram', field: 'chats', items: [CHAT] }] },
       { revision: 3, savedAt: '2026-09-22T00:00:00Z', source: 'panel', policyVersion: 'abcdef1234567890', policyChanged: true,
         notified: [{ id: 't1', title: '修复回归' }], block: 'policy',
-        changes: [{ code: 'mode', from: 'off', to: 'observe' }, { code: 'sourceField', source: 'feishu', field: 'directMessages',
-          from: true, to: false },
-          { code: 'sourceRowsAdded', source: 'feishu', field: 'chats', items: ['oc_other', 'oc_new'] }] }] },
+        changes: [{ code: 'mode', from: 'off', to: 'observe' }, { code: 'sourceField', source: 'telegram', field: 'directMessages',
+          from: false, to: true },
+          { code: 'sourceRowsAdded', source: 'telegram', field: 'chats', items: ['-100456', '-100789'] }] }] },
   }
 }
 
@@ -356,8 +351,8 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
       const { enabled, config: value } = SourceSave.parse(body.value)
       const config = source.schema.parse(value)
       // As on the server, a changed CLI that fails its check refuses the save with the setup problem.
-      if (config.cli === 'lark-broken') {
-        const refused = new SetupError('feishuCliFailed', { output: 'lark-cli: app secret missing' })
+      if (source.kind === 'github' && config.cli === 'gh-broken') {
+        const refused = new SetupError('agentCliMissing', { output: 'gh: command not found' })
         return refuse(400, refused.message, { setup: refused.problem })
       }
       restarting = (config.cli ?? '') !== (server.settings.sources[source.kind]?.config.cli ?? '')
@@ -389,8 +384,7 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
     return { revision: server.prompts.revision, context_delivery: 'injected' }
   } },
   'POST prompts/preview': { body: true, answer: ({ body }) => {
-    const skills = [...server.setup.accounts?.feishu ? ['feishu'] : [], 'github', ...Object.keys(body.skills)].map(name => [name,
-      composeSkill(body, name)])
+    const skills = ['telegram', 'github', ...Object.keys(body.skills)].map(name => [name, composeSkill(body, name)])
     // The generated parts from their templates, without variables or rules.
     const environment = environmentSection(body, []), policy = policySection(SettingsSchema.parse({ policy: { rules: [] } }), body)
     return { parts: { orchestrator: promptParts(body, 'orchestrator', environment, policy), worker: promptParts(body, 'worker', environment) },

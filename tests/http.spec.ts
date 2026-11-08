@@ -45,7 +45,7 @@ it('answers each kind of failure with its own status', async () => {
   expect(await call('PUT', 'settings/executor', { value: 'broken', revision: 0 })).toEqual({ status: 500, body: { error: 'disk full' } })
   // Block names are validated before calling settings.save: reject unknown blocks or non-existent Sources.
   expect(await call('PUT', 'settings/pause', { value: {}, revision: 0 })).toMatchObject({ status: 400 })
-  expect(await call('PUT', 'settings/source:feishu', { value: {}, revision: 0 })).toEqual({ status: 404, body: { error: 'Source not found' } })
+  expect(await call('PUT', 'settings/source:telegram', { value: {}, revision: 0 })).toEqual({ status: 404, body: { error: 'Source not found' } })
   expect(saves).toHaveLength(4)
   expect(await call('POST', 'tickets/t9/retry')).toEqual({ status: 404, body: { error: 'Ticket not found' } })
   expect(await call('GET', 'nothing/here')).toEqual({ status: 404, body: { error: 'Unknown operation' } })
@@ -61,10 +61,10 @@ it('decodes path parameters and parses each route\'s query', async () => {
     engine: { unsubscribe: (key: string) => { seen.push(key); return true } },
     sessions: { delivery: async () => 'injected' },
   })
-  expect(await call('POST', `threads/${encodeURIComponent('feishu:oc_1:om/root')}/unsubscribe`)).toMatchObject({ status: 200, body: { context_delivery: 'injected' } })
+  expect(await call('POST', `threads/${encodeURIComponent('telegram:-100123:9/root')}/unsubscribe`)).toMatchObject({ status: 200, body: { context_delivery: 'injected' } })
   // Invalid offsets default to 0, and limits above the route maximum are clamped.
   expect(await call('GET', 'decisions?kind=accept%2Creopen&limit=500&offset=x&window=24h')).toEqual({ status: 200, body: { items: [], next_offset: null } })
-  expect(seen).toEqual(['feishu:oc_1:om/root', { filter: { kinds: ['accept', 'reopen'], since: expect.any(String) }, offset: 0, limit: 200 }])
+  expect(seen).toEqual(['telegram:-100123:9/root', { filter: { kinds: ['accept', 'reopen'], since: expect.any(String) }, offset: 0, limit: 200 }])
 })
 
 it('answers only a same-origin request from the panel on the loopback address', async () => {

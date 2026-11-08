@@ -251,7 +251,7 @@ export class Settings {
     }
   }
   /**
-   * Rereads a Source's display names (such as Feishu chat names) immediately.
+   * Rereads a Source's display names (such as Telegram chat titles) immediately.
    * @returns Sorted display names (`{ added }`) that were not present in the stored label map before this read.
    * @throws UserError (`noLabels`) when the Source has no label refresh; rethrows a failed read, keeping the stored list.
    */

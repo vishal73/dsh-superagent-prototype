@@ -1,6 +1,6 @@
 /**
- * In-memory DSH host fixture (as in tests/runtime.spec.ts) running a configured Runtime with GitHub and Feishu sources,
- * allowed member Alice (`ou_alice`), listened chat `oc_team`, and `auto` eval mode. Stop it with `stop()`.
+ * In-memory DSH host fixture (as in tests/runtime.spec.ts) running a configured Runtime with GitHub and Telegram sources,
+ * allowed member Alice (`42`), listened chat `-100123`, and `auto` eval mode. Stop it with `stop()`.
  */
 import { Context } from '@deepseek-ai/cordis'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -11,21 +11,37 @@ import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import { Runtime } from '../../src/app/runtime.ts'
 import { Store } from '../../src/app/store.ts'
 import { SettingsSchema } from '../../src/policy.ts'
-import { feishuKind, feishuTrigger } from '../../src/sources/feishu.ts'
+import { telegramKind } from '../../src/sources/telegram.ts'
+import { telegramTrigger } from '../../src/sources/telegram-trigger.ts'
 import { githubKind } from '../../src/sources/github.ts'
 import { Commands } from '../../src/infra/commands.ts'
 import { credentialHelper, workerGitConfig } from '../../src/infra/environment.ts'
 import type { Trigger } from '../../src/core/index.ts'
 import { testMachine } from './deployment.ts'
 
-export const MEMBER = 'ou_alice'
-export const CHAT = 'oc_team'
+export const MEMBER = '42'
+export const CHAT = '-100123'
+const BOT = 7
 
-/** Build a Feishu mention trigger from Alice in `oc_team`, using the digits in `id` as the timestamp offset in seconds. */
-export function feishu(id: string, text: string, overrides: Record<string, unknown> = {}): Trigger {
-  const at = String(Date.parse('2026-09-09T00:00:00Z') + Number(id.replace(/\D/g, '') || 0) * 1000)
-  return feishuTrigger({ message_id: `om_${id}`, chat_id: CHAT, chat_type: 'group', sender_id: MEMBER, sender_type: 'user', content: text, create_time: at,
-    mentions: [{ id: 'ou_bot' }], ...overrides }, 'ou_bot', 'cli_bot')!
+/**
+ * Build a Telegram Trigger from Alice in `CHAT`, using the digits in `id` as the message ID and the time offset in seconds.
+ * `overrides` keep the fixture's older field names: `root_id` makes the message a reply that continues that root's Thread,
+ * `sender_id` replaces the sender, `chat_id` and `chat_type` replace the chat, and an empty `mentions` removes the mention.
+ */
+export function telegram(id: string, text: string, overrides: Record<string, unknown> = {}): Trigger {
+  const digits = (value: unknown, fallback = 0): number => Number(String(value ?? '').replace(/\D/g, '')) || fallback
+  const messageId = digits(id, 1)
+  const at = new Date(Date.parse('2026-09-09T00:00:00Z') + messageId * 1000)
+  const root = overrides.root_id === undefined ? undefined : digits(overrides.root_id, 1)
+  const from = overrides.sender_id === undefined ? { id: Number(MEMBER), is_bot: false, username: 'alice' }
+    : { id: digits(overrides.sender_id, 99), is_bot: false, username: 'guest' }
+  const chat = overrides.chat_id === undefined ? { id: Number(CHAT), type: 'supergroup' as const, title: 'Team' }
+    : { id: digits(overrides.chat_id, 1), type: (overrides.chat_type === 'p2p' ? 'private' : 'supergroup') as 'private' | 'supergroup', title: 'Team' }
+  const mentioned = !Array.isArray(overrides.mentions) || overrides.mentions.length > 0
+  return telegramTrigger({ update_id: messageId, message: { message_id: messageId, date: Math.floor(at.getTime() / 1000), chat, from, text,
+    ...(mentioned ? { entities: [{ type: 'text_mention', offset: 0, length: 0, user: { id: BOT, is_bot: true } }] } : {}),
+    ...(root === undefined ? {} : { reply_to_message: { message_id: root, from: { id: BOT, is_bot: true } } }) } },
+  { id: BOT, is_bot: true, username: 'widgets_bot' })!
 }
 
 type RegisteredTool = { name: string; execute: (args: unknown, execution: { signal: AbortSignal }) => Promise<unknown> }
@@ -134,19 +150,15 @@ export function subagentRuntime(agents: Map<string, FakeAgent>) {
 /** @param seed - writes to the database before the Runtime opens it, such as records an earlier version stored. */
 export async function startRuntime(seed?: (store: Store) => void) {
   const directory = mkdtempSync(join(tmpdir(), 'orchestrator-host-'))
-  const AGENT = join(directory, 'agent-gh'), BOT = join(directory, 'lark-bot')
+  const AGENT = join(directory, 'agent-gh')
   const repository = { default_branch: 'master', permissions: { push: true } }
   vi.spyOn(Commands.prototype, 'gh').mockImplementation(async args => args[1] === 'user' ? { login: 'agent-bot' } : repository)
-  vi.spyOn(Commands.prototype, 'lark').mockResolvedValue({ users: [{ member_id: MEMBER, name: 'Alice' }], has_more: false })
   vi.spyOn(Commands.prototype, 'git').mockResolvedValue('')
   vi.spyOn(Commands.prototype, 'run').mockResolvedValue('{"ok":true,"data":{}}')
   const scoped = 'git config -z --show-scope --get-regexp ^(credential\\..*|http\\..*extraheader)$'
   const answers: Record<string, string> = {
     [`${AGENT} api user`]: '{"login":"agent-bot","id":7}',
     [`${AGENT} api repos/acme/widgets --jq {name: .full_name, push: .permissions.push}`]: '{"name":"acme/widgets","push":true}\n',
-    [`${BOT} auth status`]: JSON.stringify({ appId: 'cli_bot', brand: 'feishu', identities: { bot: { status: 'ready' } } }),
-    [`${BOT} config strict-mode`]: 'strict-mode: bot (source: profile)',
-    [`${BOT} api GET /open-apis/bot/v3/info --as bot --format ndjson`]: '{"bot":{"open_id":"ou_bot"},"code":0,"msg":"ok"}',
     ['git config -z --show-origin --get-all credential.https://github.com.helper']: `file:${workerGitConfig(directory)}\0${credentialHelper(AGENT)}\0`,
     [scoped]: `global\0credential.helper\n\0global\0credential.https://github.com.helper\n${credentialHelper(AGENT)}\0`,
   }
@@ -243,19 +255,20 @@ export async function startRuntime(seed?: (store: Store) => void) {
     jobs: jobs.service, subagents: subagents.service }
   const ctx = new Context()
   for (const [name, service] of Object.entries(services)) ctx.reflect.provide(name, service)
-  for (const cli of [AGENT, BOT]) writeFileSync(cli, '#!/bin/sh\n', { mode: 0o755 })
+  writeFileSync(AGENT, '#!/bin/sh\n', { mode: 0o755 })
   const seeded = new Store(join(directory, 'orchestrator.sqlite'))
-  const sources = { github: { enabled: true, config: { repository: 'acme/widgets', cli: AGENT } }, feishu: { enabled: true, config: { cli: BOT } } }
+  const sources = { github: { enabled: true, config: { repository: 'acme/widgets', cli: AGENT } },
+    telegram: { enabled: true, config: { chats: [{ chatId: CHAT, listen: 'all' }], directMessages: true } } }
   seeded.saveSettings(SettingsSchema.parse({ ...seeded.settings(), sources }))
   seed?.(seeded)
   seeded.close()
   const runtime = new Runtime(ctx, testMachine({ stateDir: directory }), vi.fn())
   await runtime.ready
-  runtime.sources.register(feishuKind); runtime.sources.register(githubKind)
+  runtime.sources.register(telegramKind); runtime.sources.register(githubKind)
   const settings = runtime.store.settings()
   runtime.store.saveSettings({ ...settings, eval: { ...settings.eval, mode: 'auto' },
-    policy: { ...settings.policy, sources: { feishu: { allowed: [{ id: MEMBER, name: 'Alice' }], syncChat: CHAT }, github: { allowed: [{ id: 'alice' }] } } },
-    sources: { ...sources, feishu: { enabled: true, config: { cli: BOT, chats: [{ chatId: CHAT, listen: 'all' }], directMessages: true } } } })
+    policy: { ...settings.policy, sources: { telegram: { allowed: [{ id: MEMBER, name: 'Alice' }] }, github: { allowed: [{ id: 'alice' }] } } },
+    sources })
   deliveries.mockClear()
 
   /** Parsed JSON payloads delivered to `sessionId`. */

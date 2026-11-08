@@ -3,6 +3,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { z } from 'zod'
 import { sendTelegram, telegramLink } from './telegram-channel.ts'
 import { runTelegram } from './telegram-loops.ts'
+import { telegramThreadContext } from './telegram-read.ts'
 import { SOURCE, telegramTriggerId } from './telegram-trigger.ts'
 import { sourceContext } from './host.ts'
 import type { SourceKind } from './kind.ts'
@@ -10,6 +11,7 @@ import type { SourceKind } from './kind.ts'
 export { SOURCE, telegramAddressed, telegramChannel, telegramThreadId, telegramTrigger, telegramTriggerId } from './telegram-trigger.ts'
 export { sendTelegram, telegramGone, telegramLink } from './telegram-channel.ts'
 export { pollUpdates, runTelegram } from './telegram-loops.ts'
+export { cached, clearCache, telegramThreadContext } from './telegram-read.ts'
 const ChatSchema = z.object({ chatId: z.string().regex(/^-?\d+$/), name: z.string().trim().max(60).optional(),
   listen: z.enum(['mentions', 'all']) }).strict()
 const TelegramConfigSchema = z.object({
@@ -18,6 +20,7 @@ const TelegramConfigSchema = z.object({
   otherChats: z.enum(['none', 'mentions']).default('none'),
   pollTimeoutSeconds: z.number().int().min(1).max(50).default(25),
   failuresBeforeError: z.number().int().min(1).max(20).default(3),
+  readPageSize: z.number().int().min(1).max(50).default(20),
 }).strict()
 export type TelegramConfig = z.infer<typeof TelegramConfigSchema>
 const SenderSchema = z.object({ id: z.string().regex(/^-?\d+$/), name: z.string().trim().max(100).optional() }).strict()
@@ -44,6 +47,8 @@ export const telegramKind: SourceKind<TelegramConfig> = {
       hint: { zh: '一次 getUpdates 让 Telegram 最多等待多久；没有更新时请求在这段时间后返回，然后立即重新发起。', en: 'How long one getUpdates request may wait for Telegram; it returns after this time when there is nothing new, then the next request starts at once.' } },
     { key: 'failuresBeforeError', type: 'number', advanced: true, min: 1, max: 20, label: { zh: '连续失败几次后报告异常', en: 'Failed polls before reporting an error' },
       hint: { zh: '单次网络中断会退避重试，不必报告。', en: 'A single network interruption is retried with backoff and need not be reported.' } },
+    { key: 'readPageSize', type: 'number', advanced: true, min: 1, max: 50, label: { zh: '每页消息数', en: 'Messages per page' },
+      hint: { zh: '智能体读取线程时每页的消息数；Telegram 不能读取历史，缓存的是本进程收到的消息。', en: 'Messages per page when agents read a Thread; Telegram cannot read history, so the cache holds what this process received.' } },
   ],
   health: ['telegram'],
   scope({ meta }, config) {
@@ -57,7 +62,7 @@ export const telegramKind: SourceKind<TelegramConfig> = {
     allowed: (address, config) => telegramKind.scope!({ meta: { chatId: address.chatId ?? '', direct: address.direct === 'true' } }, config).listened,
     send: sendTelegram, link: telegramLink,
   },
-  // The Bot API has no history read, so an assessment sees the Trigger's own text and the message it replies to, not the conversation around it.
+  threadContext: telegramThreadContext,
   repliesTo: trigger => typeof trigger.meta.parentId === 'string' ? telegramTriggerId(String(trigger.meta.chatId ?? ''), trigger.meta.parentId) : undefined,
   policy: {
     unnamed: { person: { zh: 'Telegram 用户', en: 'Telegram user' }, bot: { zh: 'Telegram 机器人', en: 'Telegram bot' } },

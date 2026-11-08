@@ -12,7 +12,7 @@ import { SourceRegistry } from '../src/sources/registry.ts'
 import { sourceContextOf, type SourceContextDeps } from '../src/app/source-context.ts'
 import { KV } from '../src/kv.ts'
 import type { SourceKind } from '../src/sources/kind.ts'
-import { apply, pollUpdates, sendTelegram, telegramGone, telegramKind, telegramTrigger } from '../src/sources/telegram.ts'
+import { apply, clearCache, pollUpdates, sendTelegram, telegramGone, telegramKind, telegramThreadContext, telegramTrigger } from '../src/sources/telegram.ts'
 import { testDeployment } from './fixtures/deployment.ts'
 
 const ME = { id: 7, is_bot: true, username: 'widgets_bot' }
@@ -51,6 +51,7 @@ function host(overrides: Partial<SourceContextDeps> = {}) {
 }
 
 beforeEach(() => {
+  clearCache()
   process.env.TELEGRAM_BOT_TOKEN = 'test-token'
   process.env.TELEGRAM_API_BASE = 'https://telegram.test'
 })
@@ -65,16 +66,16 @@ describe('Telegram messages as Triggers', () => {
     const trigger = telegramTrigger(update({ chat: { id: 42, type: 'private' } }) as never, ME)!
     expect(trigger).toMatchObject({
       id: key('telegram', '42:10'), source: 'telegram',
-      threads: [{ source: 'telegram', id: '42:root' }], actor: { source: 'telegram', id: '42' },
+      threads: [{ source: 'telegram', id: '42:10' }], actor: { source: 'telegram', id: '42' },
       human: true, addressed: 'direct', at: '2023-11-14T22:13:20.000Z',
-      channel: { source: 'telegram', thread: 'telegram:42:root', address: { chatId: '42', messageId: '10' } },
-      meta: { chatId: '42', chatType: 'private', messageId: '10', threadId: '42:root', direct: true, mentioned: false },
+      channel: { source: 'telegram', thread: 'telegram:42:10', address: { chatId: '42', messageId: '10' } },
+      meta: { chatId: '42', chatType: 'private', messageId: '10', threadId: '42:10', root: '10', direct: true, mentioned: false },
     })
     expect(trigger.text).toBe('please fix the flaky test')
   })
   it('recognizes a forum topic, an @mention and a reply to the bot', () => {
     const topic = telegramTrigger(update({ message_thread_id: 5, is_topic_message: true }) as never, ME)!
-    expect(topic.threads[0]).toEqual({ source: 'telegram', id: '-100123:5' })
+    expect(topic.threads[0]).toEqual({ source: 'telegram', id: '-100123:topic-5' })
     expect(topic.channel?.address).toEqual({ chatId: '-100123', messageId: '10', topic: '5' })
     const mentioned = telegramTrigger(update({ entities: [{ type: 'mention', offset: 0, length: 12 }], text: '@widgets_bot fix it' }) as never, ME)!
     expect(mentioned.addressed).toBe('mention')
@@ -120,6 +121,33 @@ describe('Telegram polling', () => {
     await expect(pollUpdates(h.ctx, telegramKind.schema.parse({ chats: [{ chatId: '-100123', listen: 'all' }] }), 'other-token', new AbortController().signal))
       .rejects.toThrow('engine unavailable')
     expect(h.store.get(KV.telegram.offset)).toBe(5)
+    h.store.close()
+  })
+})
+
+describe('Telegram Thread context', () => {
+  it('reads a Thread from the messages this process received, and joins a reply to its parent\'s Thread', async () => {
+    const h = host()
+    const config = telegramKind.schema.parse({ chats: [{ chatId: '-100123', listen: 'all' }] })
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(answer(ME))
+      .mockResolvedValueOnce(answer([
+        update({ message_id: 10, text: 'the root' }, 1),
+        update({ message_id: 11, text: 'a reply', reply_to_message: { message_id: 10, from: { id: 42, is_bot: false } } }, 2),
+      ])))
+    await pollUpdates(h.ctx, config, 'thread-token', new AbortController().signal)
+    expect(h.store.threads.get('telegram:-100123:10')).toBeDefined()
+    const trigger = h.store.triggers.get(key('telegram', '-100123:11'))!
+    const context = telegramThreadContext.read(undefined as never, trigger, 'thread', undefined, config)
+    await expect(context).resolves.toMatchObject({ status: 'available', messages: [expect.objectContaining({ id: '10', text: 'the root' }), expect.objectContaining({ id: '11', text: 'a reply', reply_to: '10' })] })
+    await expect(telegramThreadContext.read(undefined as never, trigger, 'parent', undefined, config)).resolves.toMatchObject({ messages: [{ id: '10' }] })
+    h.store.close()
+  })
+  it('reports a Thread it never received instead of inventing one', async () => {
+    const h = host()
+    const trigger = telegramTrigger(update({ message_id: 40 }) as never, ME)!
+    await expect(telegramThreadContext.read(undefined as never, trigger, 'thread', undefined, { readPageSize: 20 }))
+      .resolves.toMatchObject({ status: 'not_cached', messages: [] })
     h.store.close()
   })
 })

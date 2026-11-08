@@ -34,7 +34,7 @@ function label(t: T, reason: Reason): string {
 export const setupText = (t: T, problem: Pick<SetupProblem, 'code' | 'values'>): string => t(`setup.${problem.code}`, problem.values)
 export const healthText = (t: T, health: Pick<Health, 'detail' | 'code' | 'values'>): string =>
   health.code ? t(`healthCode.${health.code}` as const, health.values) : health.detail
-/** Replaces Feishu and GitHub content placeholders (images, cards, media, forwards, unresolved mentions) with localized labels. */
+/** Replaces GitHub content placeholders (images, cards, media, forwards, unresolved mentions) with localized labels. */
 export function readableMarkers(t: T, text: string): string {
   return text.replace(/!\[[^\]]*\]\([^)]*\)|\[Image: [^\]]*\]|\[image\]/g, t('imageMarker'))
     .replace(/\[Chat card: [^\]]*\]/g, t('cardMarker'))

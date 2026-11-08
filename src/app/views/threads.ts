@@ -53,17 +53,15 @@ export function threadDetail(host: ViewHost, key: string, before: string | undef
 }
 export type ThreadDetailView = NonNullable<ReturnType<typeof threadDetail>>
 /**
- * Searches triggers, threads, and tickets by text, ID, source-extracted references (e.g., `#N`, URLs), or cached Feishu AppLinks.
- * @param links - Feishu message AppLinks cached since startup, keyed by chat and message ID.
+ * Searches triggers, threads, and tickets by text, ID, or source-extracted references (e.g., `#N`, URLs).
  */
-export function search(host: ViewHost, query: string, links: Pick<TextCache, 'entries'>) {
+export function search(host: ViewHost, query: string) {
   const { store, sources } = host
   const value = query.trim()
   if (!value) return { tickets: [], items: [], threads: [] }
   const view = snapshot(host)
   const named = sources.find(value)
   const terms = new Set([value, ...named.terms])
-  for (const [name, url] of links.entries()) if (url === value) terms.add(name.split(':').at(-1)!)
   const found = new Map<string, Trigger>()
   for (const term of terms) for (const trigger of store.read.search(term)) found.set(trigger.id, trigger)
   const threads = named.threads.flatMap(key => { const thread = store.threads.get(key); return thread ? [threadSummary(view, thread)]

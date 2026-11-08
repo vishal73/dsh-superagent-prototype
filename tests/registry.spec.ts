@@ -8,9 +8,9 @@ import type { OutboundMessage } from '../src/core/index.ts'
 import { Commands } from '../src/infra/commands.ts'
 import { HealthBoard } from '../src/infra/health.ts'
 import { sourceContextOf, type SourceContextDeps } from '../src/app/source-context.ts'
-import { feishuChannel, feishuTrigger, feishuTriggerId } from '../src/sources/feishu-trigger.ts'
+import { telegramChannel, telegramTrigger, telegramTriggerId } from '../src/sources/telegram-trigger.ts'
 import { testDeployment } from './fixtures/deployment.ts'
-import { feishuKind } from '../src/sources/feishu.ts'
+import { telegramKind } from '../src/sources/telegram.ts'
 import { githubKind } from '../src/sources/github.ts'
 
 const probe: SourceKind<{ interval: number }> = {
@@ -100,21 +100,23 @@ describe('Source registry', () => {
   })
   it('names the Trigger whose message a Trigger\'s message answers, where its kind can', () => {
     const sources = new SourceRegistry(() => SettingsSchema.parse({}))
-    sources.register(feishuKind); sources.register(githubKind)
-    const reply = feishuTrigger({ message_id: 'om_2', chat_id: 'oc_1', chat_type: 'group', sender_id: 'ou_alice', sender_type: 'user',
-      content: 'yes', create_time: '1757376000000', parent_id: 'om_1' }, 'ou_bot', 'cli_bot')!
-    expect(sources.repliesTo(reply)).toBe(feishuTriggerId('om_1'))
+    sources.register(telegramKind); sources.register(githubKind)
+    const reply = telegramTrigger({ update_id: 2, message: { message_id: 2, date: 1_757_376_000,
+      chat: { id: -100123, type: 'supergroup' }, from: { id: 42, is_bot: false, username: 'alice' }, text: 'yes',
+      reply_to_message: { message_id: 1, from: { id: 42, is_bot: false } } } }, { id: 7, is_bot: true, username: 'widgets_bot' })!
+    expect(sources.repliesTo(reply)).toBe(telegramTriggerId('-100123', '1'))
     expect(sources.repliesTo({ ...reply, meta: { ...reply.meta, parentId: undefined } })).toBeUndefined()
     expect(sources.repliesTo({ ...reply, source: 'github' })).toBeUndefined()
   })
-  it('finds what a search query names in each kind\'s terms', () => {
+  it('finds what a search query names in each kind\'s terms, where a kind has them', () => {
     const sources = new SourceRegistry(() => SettingsSchema.parse({}))
-    sources.register(feishuKind); sources.register(githubKind)
+    sources.register(telegramKind); sources.register(githubKind)
     expect(sources.find('#12')).toEqual({ threads: ['github:12'], terms: [] })
     expect(sources.find('https://github.com/acme/widgets/pull/7#issuecomment-3')).toEqual({ threads: ['github:7'], terms: [] })
-    expect(sources.find('see om_abc and om_abc, om_def')).toEqual({ threads: [], terms: ['om_abc', 'om_def'] })
+    // A Telegram message is found by its link or its text, not by a free-text term search.
+    expect(telegramKind.find).toBeUndefined()
     expect(sources.find('login fails')).toEqual({ threads: [], terms: [] })
-    expect(feishuKind.policy!.unnamed).toEqual({ person: { zh: '飞书用户', en: 'Feishu user' }, bot: { zh: '飞书机器人', en: 'Feishu bot' } })
+    expect(telegramKind.policy!.unnamed).toEqual({ person: { zh: 'Telegram 用户', en: 'Telegram user' }, bot: { zh: 'Telegram 机器人', en: 'Telegram bot' } })
   })
   it('refuses a second registration of one kind and forgets a kind after its disposer runs', () => {
     const sources = new SourceRegistry(() => SettingsSchema.parse({}))
@@ -124,39 +126,50 @@ describe('Source registry', () => {
     expect(sources.instance('probe')).toBeUndefined()
   })
   it('validates each Source\'s part of the Policy with its kind, keeping parts of kinds that are not installed as stored', () => {
-    const sources = new SourceRegistry(() => SettingsSchema.parse({ policy: { sources: { feishu: { allowed: [{ id: 'ou_alice' }] } } } }))
-    sources.register(feishuKind); sources.register(githubKind)
-    expect(sources.validatePolicy({ feishu: { allowed: [{ id: 'ou_alice', name: 'Alice' }] }, retired: { allowed: [], x: 1 } }))
-      .toEqual({ feishu: { allowed: [{ id: 'ou_alice', name: 'Alice' }], syncChat: '', admission: {} }, retired: { allowed: [], x: 1 } })
-    expect(() => sources.validatePolicy({ feishu: { allowed: [{ id: 'alice' }] } })).toThrow()
-    expect(sources.policyPart('feishu')).toEqual({ allowed: [{ id: 'ou_alice' }], syncChat: '', admission: {} })
+    const sources = new SourceRegistry(() => SettingsSchema.parse({ policy: { sources: { telegram: { allowed: [{ id: '42' }] } } } }))
+    sources.register(telegramKind); sources.register(githubKind)
+    expect(sources.validatePolicy({ telegram: { allowed: [{ id: '42', name: 'Alice' }] }, retired: { allowed: [], x: 1 } }))
+      .toEqual({ telegram: { allowed: [{ id: '42', name: 'Alice' }], admission: {} }, retired: { allowed: [], x: 1 } })
+    expect(() => sources.validatePolicy({ telegram: { allowed: [{ id: 'alice' }] } })).toThrow()
+    expect(sources.policyPart('telegram')).toEqual({ allowed: [{ id: '42' }], admission: {} })
     expect(sources.policyPart('github')).toEqual({ allowed: [], admission: {} })
     sources.register(probe)
     expect(sources.policyPart('probe')).toBeUndefined()
   })
   it('allows a reply only on a Channel whose Source still listens to its chat', () => {
-    const settings = SettingsSchema.parse({ sources: { feishu: { enabled: true, config: { chats: [{ chatId: 'oc_team', listen: 'mentions' }], directMessages: false } } } })
+    const settings = SettingsSchema.parse({ sources: { telegram: { enabled: true, config: { chats: [{ chatId: '-100123', listen: 'mentions' }], directMessages: false } } } })
     const sources = new SourceRegistry(() => settings)
-    expect(sources.channelAllowed({ source: 'feishu', address: { chatId: 'oc_team' } })).toBe(false)
-    sources.register(feishuKind); sources.register(githubKind)
-    expect(sources.channelAllowed({ source: 'feishu', address: { chatId: 'oc_team' } })).toBe(true)
-    expect(sources.channelAllowed({ source: 'feishu', address: { chatId: 'oc_other' } })).toBe(false)
-    // A direct chat's id starts with oc_ too; the address says it is direct, and with direct messages off it gets no reply.
-    expect(sources.channelAllowed(feishuChannel('oc_dm', 'om_1', true))).toBe(false)
+    expect(sources.channelAllowed({ source: 'telegram', address: { chatId: '-100123' } })).toBe(false)
+    sources.register(telegramKind); sources.register(githubKind)
+    expect(sources.channelAllowed({ source: 'telegram', address: { chatId: '-100123' } })).toBe(true)
+    expect(sources.channelAllowed({ source: 'telegram', address: { chatId: '-100777' } })).toBe(false)
+    // A direct chat is marked in the Channel's address; with direct messages off it gets no reply.
+    expect(sources.channelAllowed(telegramChannel('42', '10'))).toBe(false)
+    expect(sources.channelAllowed({ source: 'telegram', address: { chatId: '42', messageId: '10', direct: 'true' } })).toBe(false)
     expect(sources.channelAllowed({ source: 'github', address: { number: '7' } })).toBe(true)
   })
-  it('delivers a reply to a direct message under the default settings', async () => {
+  it('delivers a reply under the default settings to a chat the Source receives', async () => {
     const sources = new SourceRegistry(() => SettingsSchema.parse({}))
-    sources.register(feishuKind)
-    const trigger = feishuTrigger({ message_id: 'om_dm', chat_id: 'oc_dm', chat_type: 'p2p', sender_id: 'ou_alice', sender_type: 'user',
-      content: 'fix it', create_time: '1757376000000' }, 'ou_bot', 'cli_bot')!
+    sources.register(telegramKind)
+    const trigger = telegramTrigger({ update_id: 10, message: { message_id: 10, date: 1_757_376_000,
+      chat: { id: 42, type: 'private' }, from: { id: 42, is_bot: false, username: 'alice' }, text: 'fix it' } },
+    { id: 7, is_bot: true, username: 'widgets_bot' })!
     const channel = trigger.channel!
-    expect(channel.address).toEqual({ chatId: 'oc_dm', messageId: 'om_dm', direct: 'true' })
-    expect(sources.channelAllowed(channel)).toBe(true)
+    expect(channel.address).toEqual({ chatId: '42', messageId: '10' })
     const commands = new Commands(() => testDeployment(), {}, new AbortController().signal)
-    const run = vi.spyOn(commands, 'run').mockResolvedValue('{"ok":true,"data":{}}')
-    const reply: OutboundMessage = { id: 'reply-1', channel, text: 'Done', kind: 'reply' }
-    expect(await sources.send(reply, commands)).toBe('sent')
-    expect(run.mock.calls[0]![1]).toEqual(expect.arrayContaining(['+messages-reply', '--message-id', 'om_dm']))
+    const fetch = vi.fn(async (_url: string, _init?: RequestInit) => ({ status: 200, json: async () => ({ ok: true, result: { message_id: 20 } }) }) as Response)
+    vi.stubGlobal('fetch', fetch)
+    process.env.TELEGRAM_BOT_TOKEN = 'test-token'
+    try {
+      // A direct chat is allowed while direct messages are on; its address names the chat to reply in.
+      const allowed = { ...channel, address: { ...channel.address, direct: 'true' } }
+      expect(sources.channelAllowed(allowed)).toBe(true)
+      const reply: OutboundMessage = { id: 'reply-1', channel: allowed, text: 'Done', kind: 'reply' }
+      expect(await sources.send(reply, commands)).toBe('sent')
+      expect(JSON.parse(String(fetch.mock.calls[0]![1]?.body))).toEqual({ chat_id: '42', text: 'Done', reply_to_message_id: 10 })
+    } finally {
+      delete process.env.TELEGRAM_BOT_TOKEN
+      vi.unstubAllGlobals()
+    }
   })
 })

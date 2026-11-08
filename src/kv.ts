@@ -36,7 +36,7 @@ export const KV = {
   /** Schema 11 migration: legacy main-Session queues imported into the effect table. */
   queues: { relays: record<{ id: string; text: string }[]>('relay-queue'), unsubscribed: record<string[]>('subscription-results'),
     prompts: record<number | null>('prompt-notification'), settings: record<number | null>('settings-notification') },
-  /** Per-Source resolved display names mapping a named ID (such as a Feishu chat ID) to its display name. */
+  /** Per-Source resolved display names mapping a named ID (such as a Telegram chat ID) to its display name. */
   sources: { labels: family<Record<string, string>, [source: string]>('source-labels:') },
   /**
    * GitHub Source: notification cursor and pending retries; per-Issue/PR read cursor shared by notification and polled reads;
@@ -50,11 +50,4 @@ export const KV = {
     ci: family<{ fingerprint: string; revision: number }, [number: number]>('github-ci:') },
   /** Telegram Source: the `update_id` after which `getUpdates` continues, so a restart does not replay stored updates. */
   telegram: { offset: record<number>('telegram-offset') },
-  /**
-   * Feishu Source: known chats (`true` for direct messages); per-chat history cursor and active topics mapped from topic ID
-   * to last-seen timestamp; and per-polled-thread seen message IDs and initialization flag.
-   */
-  feishu: { chats: record<Record<string, boolean>>('feishu-chats'), history: family<string, [chat: string]>('feishu-history:'),
-    topics: family<Record<string, string>, [chat: string]>('feishu-history-threads:'),
-    seen: family<string[], [thread: string]>('thread-seen:'), initialized: family<boolean, [thread: string]>('thread-initialized:') },
 }

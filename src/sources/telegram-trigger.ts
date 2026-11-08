@@ -29,12 +29,13 @@ export const UpdateSchema = z.looseObject({
   edited_message: MessageSchema.optional(),
 })
 export type TelegramUpdate = z.infer<typeof UpdateSchema>
-/** Thread of a chat or forum topic; `root` is the chat's main conversation. */
-export const telegramThreadId = (chatId: number | string, topic: number | string | undefined): string =>
-  `${chatId}:${topic === undefined ? 'root' : String(topic)}`
+/** Thread of a chat: one per forum topic, otherwise one per reply chain, named after the message that started it. */
+export const telegramThreadId = (chatId: number | string, topic: number | string | undefined, root: number | string): string =>
+  `${chatId}:${topic === undefined ? String(root) : `topic-${topic}`}`
 /** Constructs the reply address; a forum topic is part of it so the reply lands in the same topic. */
-export const telegramChannel = (chatId: number | string, messageId: number | string, topic?: number | string, url?: string): ChannelRef => ({
-  source: SOURCE, thread: `telegram:${telegramThreadId(chatId, topic)}`,
+export const telegramChannel = (chatId: number | string, messageId: number | string, topic?: number | string, url?: string,
+  root?: number | string): ChannelRef => ({
+  source: SOURCE, thread: `telegram:${telegramThreadId(chatId, topic, root ?? messageId)}`,
   address: { chatId: String(chatId), messageId: String(messageId), ...(topic === undefined ? {} : { topic: String(topic) }), ...(url ? { url } : {}) },
 })
 /** Deterministic trigger ID for a message; an edit appends its `edit_date` so the edit is a new event. */
@@ -51,8 +52,12 @@ export function telegramAddressed(message: TelegramMessage, me: TelegramMe): boo
     : entity.type === 'mention' && !!me.username && text.slice(entity.offset, entity.offset + entity.length).toLowerCase() === `@${me.username.toLowerCase()}`)) return true
   return message.reply_to_message?.from?.id === me.id
 }
-/** Converts one update into a Trigger; returns undefined when it carries no message or only the bot's own post. */
-export function telegramTrigger(update: TelegramUpdate, me: TelegramMe): Trigger | undefined {
+/**
+ * Converts one update into a Trigger; returns undefined when it carries no message or only the bot's own post.
+ * `rootOf` answers which Thread a message continues, so a reply joins its parent's Thread instead of starting one.
+ */
+export function telegramTrigger(update: TelegramUpdate, me: TelegramMe,
+  rootOf: (chatId: string, messageId: string) => string | undefined = () => undefined): Trigger | undefined {
   const message = update.message ?? update.edited_message
   if (!message) return undefined
   const from = message.from
@@ -66,19 +71,21 @@ export function telegramTrigger(update: TelegramUpdate, me: TelegramMe): Trigger
   const at = new Date((message.edit_date ?? message.date) * 1000).toISOString()
   const url = message.chat.username ? `https://t.me/${message.chat.username}/${message.message_id}` : undefined
   const parentId = message.reply_to_message?.message_id
+  const root = topic !== undefined ? topic : parentId === undefined ? message.message_id
+    : rootOf(String(chatId), String(parentId)) ?? String(parentId)
   return {
     id: telegramTriggerId(chatId, message.message_id, message.edit_date),
     source: SOURCE,
-    threads: [{ source: SOURCE, id: telegramThreadId(chatId, topic) }],
+    threads: [{ source: SOURCE, id: telegramThreadId(chatId, topic, root) }],
     actor: { source: SOURCE, id: String(from?.id ?? message.sender_chat?.id ?? chatId) },
     human: !(from?.is_bot ?? false) && message.sender_chat === undefined,
     ...(addressed ? { addressed } : {}),
     at,
     text: message.text ?? message.caption ?? '',
-    channel: telegramChannel(chatId, message.message_id, topic, url),
+    channel: telegramChannel(chatId, message.message_id, topic, url, root),
     ...(url ? { url } : {}),
     meta: { chatId: String(chatId), chatType: message.chat.type, messageId: String(message.message_id),
-      threadId: telegramThreadId(chatId, topic), direct, mentioned,
+      threadId: telegramThreadId(chatId, topic, root), root: String(root), direct, mentioned,
       ...(topic === undefined ? {} : { topic: String(topic) }),
       ...(message.chat.title ? { chatTitle: message.chat.title } : {}),
       ...(parentId === undefined ? {} : { parentId: String(parentId) }) },

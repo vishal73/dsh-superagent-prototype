@@ -16,7 +16,7 @@ it('opens the Decisions under Policy from the flow line with their reasons, Deci
   expect(text()).toContain(zh['reason.explicitRouted'])
   await click(zh.stop)
   expect(server.requests.some(request => request.path === 'decisions?limit=30&kind=stop&window=24h')).toBe(true)
-  expect(text()).toContain('@bot 修一下')
+  expect(text()).toContain('@widgets_bot 修一下')
   await click(zh['decision.ignore'])
   expect(server.requests.some(request => request.path === 'decisions?limit=30&kind=ignore&window=24h')).toBe(true)
   expect(text()).toContain(zh.none)
@@ -28,13 +28,13 @@ it('keeps a Policy draft across remounts, and merges another save into it sender
   const addUser = async () => {
     await click(all('.dt-part button').find(button => button.textContent === '添加')!)
     const row = all('.dt-part .dt-rows-item').at(-1)!
-    await type(row.querySelector<HTMLInputElement>('input[aria-label="open_id"]')!,
-      'ou_newperson'); await type(row.querySelector<HTMLInputElement>('input[aria-label="名字"]')!, '新人')
+    await type(row.querySelector<HTMLInputElement>('input[aria-label="用户 ID"]')!,
+      '43'); await type(row.querySelector<HTMLInputElement>('input[aria-label="名字"]')!, '新人')
   }
   await mount()
   await click(zh['tab.eval'])
   await click(find(zh['tab.settings'], '.dt-status-head button'))
-  expect(all('.dt-subtab').map(tab => tab.textContent)).toEqual(['飞书', 'GitHub'])
+  expect(all('.dt-subtab').map(tab => tab.textContent)).toEqual(['Telegram', 'GitHub'])
   await addUser()
   expect(text()).toContain(zh.draftKept)
   await remount()
@@ -43,7 +43,7 @@ it('keeps a Policy draft across remounts, and merges another save into it sender
   // Someone else renames a rule and allows another sender meanwhile: the draft keeps its own sender and takes both of theirs.
   const { policy } = server.settings
   server.settings = { ...server.settings, policy: { ...policy, rules: [{ ...policy.rules[0]!, name: '文案' }],
-    sources: { ...policy.sources, feishu: { ...policy.sources.feishu!, allowed: [...policy.sources.feishu!.allowed, { id: 'ou_bob',
+    sources: { ...policy.sources, telegram: { ...policy.sources.telegram!, allowed: [...policy.sources.telegram!.allowed, { id: '44',
       name: 'Bob' }] } } } }
   server.revisions.policy = 4
   await click(zh.save)
@@ -51,8 +51,8 @@ it('keeps a Policy draft across remounts, and merges another save into it sender
   await type(all('.dt-part input[aria-label="名字"]').at(-2) as HTMLInputElement, '新同事')
   expect(text()).not.toContain(zh.saveMerged)
   await click(zh.save)
-  expect(server.settings.policy.sources.feishu!.allowed).toEqual([{ id: 'ou_alice', name: 'Alice' }, { id: 'ou_newperson', name: '新同事' },
-    { id: 'ou_bob', name: 'Bob' }])
+  expect(server.settings.policy.sources.telegram!.allowed).toEqual([{ id: '42', name: 'Alice' }, { id: '43', name: '新同事' },
+    { id: '44', name: 'Bob' }])
   expect(server.settings.policy.rules.map(rule => rule.name)).toEqual(['文案'])
   expect(sessionStorage.getItem('dsh-superagent/draft/master/policy')).toBeNull()
 })
@@ -64,7 +64,7 @@ it('keeps the Policy to its rules and each Source\'s part, in that Source\'s own
   // Auto-merge and its threshold are prompt text, and no Source's settings sit in the Policy core.
   for (const gone of ['自动合并', '行数阈值', '成员', '计入策略版本']) expect(text()).not.toContain(gone)
   expect(all('.dt-lv').map(item => item.textContent)[0]).toBe('策略版本 abcdef12')
-  expect(text()).toContain('名单内的人 @ 机器人或私聊机器人，总是明确的请求')
+  expect(text()).toContain('名单内的人私聊机器人或 @ 机器人，总是明确的请求')
   await click(find(zh['source.github'], '.dt-subtab'))
   expect(text()).toContain('能发起工作的 GitHub 账号')
   expect(text()).toContain('名单里的账号在 Issue 或评论里 @ 智能体的账号。')
@@ -82,20 +82,6 @@ it('opens the rule list for an invalid field inside it only', async () => {
   await click(all('.dt-rule [data-disclosure-row]')[0]!)
   await act(async () => { all('.dt-rule input')[0]!.dispatchEvent(new Event('invalid')) })
   expect(openRows()).toBe(all('.dt-rule').length)
-})
-
-it('syncs a Source\'s list from where the Source keeps it, but not while a Policy draft is unsaved', async () => {
-  await mount()
-  await click(zh['tab.eval'])
-  await click(find(zh['tab.settings'], '.dt-status-head button'))
-  expect([...all('.dt-part select')[0]!.querySelectorAll('option')].map(option => option.textContent)).toEqual(['不同步', '另一个群', '团队群'])
-  await click(find('立即同步', '.dt-part button'))
-  expect(server.requests.some(request => request.path === 'policy-sync/feishu' && request.method === 'POST')).toBe(true)
-  await type(all('.dt-part select')[0] as HTMLSelectElement, 'oc_other')
-  const before = server.requests.length
-  await click(find('立即同步', '.dt-part button'))
-  expect(document.querySelector('.dt-toast')?.textContent).toBe(zh.syncNeedsSave)
-  expect(server.requests.slice(before).some(request => request.path.startsWith('policy-sync'))).toBe(false)
 })
 
 it('adds, copies, renames, disables and deletes rules in Policy without touching Eval', async () => {
@@ -134,9 +120,9 @@ it('shows the current Policy version once, explains what makes it up, and opens 
   expect(text()).toContain('生成策略版本 98765432')
 })
 
-it('sets the Feishu admission table per receiving scope, offering only the cells a scope can receive, and warns when anyone may originate work', async () => {
-  server.settings = { ...server.settings, sources: { ...server.settings.sources, feishu: { enabled: true, config: { cli: 'lark-bot',
-    chats: [{ chatId: 'oc_team', listen: 'all' }, { chatId: 'oc_other', listen: 'mentions' }], directMessages: true,
+it('sets the Telegram admission table per receiving scope, offering only the cells a scope can receive, and warns when anyone may originate work', async () => {
+  server.settings = { ...server.settings, sources: { ...server.settings.sources, telegram: { enabled: true, config: {
+    chats: [{ chatId: '-100123', listen: 'all' }, { chatId: '-100456', listen: 'mentions' }], directMessages: true,
       otherChats: 'none' } } } }
   await mount()
   await click(tab(zh['tab.settings']))
@@ -144,17 +130,17 @@ it('sets the Feishu admission table per receiving scope, offering only the cells
   const rows = all('.dt-admission tbody tr').map(row => [row.querySelector('.dt-admission-scope')!.firstChild?.textContent,
     row.querySelectorAll('select').length])
   // Chats receiving every message have all three cells; @-only chats only the mention cell; other chats nothing while not received.
-  expect(rows).toEqual([['团队群', 3], ['另一个群', 1], ['其他群', 0], ['私聊', 1]])
-  const cell = field<HTMLSelectElement>('团队群 · 名单外 · 点名智能体')
+  expect(rows).toEqual([['-100123', 3], ['-100456', 1], ['其他群', 0], ['私聊', 1]])
+  const cell = field<HTMLSelectElement>('-100123 · 名单外 · 点名智能体')
   expect(cell.value).toBe('ignore')
   await type(cell, 'explicit')
   // The warning is an icon in a slot every cell reserves, with the text on hover, so the table does not move.
   expect(document.querySelector('.dt-admission .dt-info-warn')?.getAttribute('aria-label')).toBe(zh.admissionAnyoneWarning)
   expect(all('.dt-admission-slot')).toHaveLength(5)
   // A message not addressed to the bot cannot be an explicit request.
-  expect([...field<HTMLSelectElement>('团队群 · 名单外 · 未 @').options].map(option => option.value)).toEqual(['inferred', 'ignore'])
+  expect([...field<HTMLSelectElement>('-100123 · 名单外 · 未 @').options].map(option => option.value)).toEqual(['inferred', 'ignore'])
   await click(zh.save)
-  expect(server.settings.policy.sources.feishu!.admission).toEqual({ oc_team: { unlistedAddressed: 'explicit' } })
+  expect(server.settings.policy.sources.telegram!.admission).toEqual({ '-100123': { unlistedAddressed: 'explicit' } })
 })
 
 it('lists each Source\'s bots next to its people and saves them, and sets the GitHub admission table by its receiving scopes', async () => {
@@ -173,9 +159,9 @@ it('lists each Source\'s bots next to its people and saves them, and sets the Gi
     await click([...list(label).querySelectorAll('button')].find(button => button.textContent === zh.addRow)!)
     return [...list(label).querySelectorAll('.dt-rows-item')].at(-1)!
   }
-  expect(lists()).toEqual(['能发起工作的飞书用户', '消息可以成为候选的机器人'])
+  expect(lists()).toEqual(['能发起工作的 Telegram 用户', '消息可以成为候选的机器人'])
   const bot = await add('消息可以成为候选的机器人')
-  await type(bot.querySelector<HTMLInputElement>('input[aria-label="App ID 或 open_id"]')!, 'cli_reviewer')
+  await type(bot.querySelector<HTMLInputElement>('input[aria-label="用户 ID"]')!, '99')
   await type(bot.querySelector<HTMLInputElement>('input[aria-label="名字"]')!, '评审机器人')
   await click(find(zh['source.github'], '.dt-subtab'))
   expect(lists()).toEqual(['能发起工作的 GitHub 账号', '评论可以成为候选的机器人'])
@@ -186,7 +172,7 @@ it('lists each Source\'s bots next to its people and saves them, and sets the Gi
   expect(rows()).toEqual([['新 Issue', '仅 @', 1], ['新 PR', '仅 @', 1], ['评论', '仅 @', 1], ['默认分支的 CI', '不接收', 0]])
   expect(field<HTMLSelectElement>('新 Issue · 名单外 · 点名智能体').value).toBe('ignore')
   await click(zh.save)
-  expect(server.settings.policy.sources.feishu!.bots).toEqual([{ id: 'cli_reviewer', name: '评审机器人' }])
+  expect(server.settings.policy.sources.telegram!.bots).toEqual([{ id: '99', name: '评审机器人' }])
   expect(server.settings.policy.sources.github!.bots).toEqual([{ id: 'dependabot[bot]' }])
 })
 
