@@ -25,6 +25,7 @@ Both presets run with `danger-full-access` as the operator's OS user and read me
 - A repository on github.com; GitHub Enterprise Server is not supported. To create a checkout per Ticket, keep a local clone from which the prepare command can add worktrees. Install `git-lfs` if that repository uses Git LFS.
 - A model provider configured for DeepSeek Harness. dsh-superagent uses the profile's default model unless the Eval or Execution settings name another.
 - For Telegram: a bot token from [@BotFather](https://t.me/BotFather); no extra CLI is needed
+- For desktop work, optional: the [`agent-desktop`](https://github.com/vercel-labs/agent-desktop) CLI on the operator's `PATH`, with the platform's accessibility permission granted
 
 ## Accounts
 
@@ -58,6 +59,16 @@ Both presets run with `danger-full-access` as the operator's OS user and read me
    ```
 
    If the profile runs as a service, put the variable in the unit or wrapper that starts it. The variable is read at every poll, so changing it needs a restart of the dsh-superagent process, which `scripts/dsh-superagent restart` performs.
+
+### Desktop apps (optional)
+
+A Ticket may ask for something only a desktop app can do: read a window, fill a form, use the clipboard. The bundle always registers the `dsh-superagent-desktop` skill, and the skill refuses to guess when the CLI is missing.
+
+1. Install the CLI on the machine that runs dsh-superagent: `npm install -g agent-desktop`, or Homebrew on macOS and Linux.
+2. Grant the accessibility permission the platform needs; on macOS, `agent-desktop permissions --guide` walks the operator through it. A worker Session cannot grant it.
+3. Check with `agent-desktop status`. A Telegram request can then ask the agent to operate an app; the worker Session reads the skill and drives the snapshot, action and verification loop.
+
+Snapshots, screenshots and clipboard reads contain whatever the operator's desktop shows. The skill tells Sessions to keep them out of GitHub and short Telegram replies; the operator decides whether a profile should be allowed desktop access at all.
 
 ## Install
 
@@ -219,7 +230,7 @@ A file in `worker-bin` or `worker-gitconfig` that dsh-superagent did not write s
 
 ## Try it
 
-From an allowed GitHub account, open an Issue or post a comment containing `@<agent login> <request>`. Within a polling interval (one minute by default), Overview should show a Ticket. The agent acknowledges the request, works in its own Session and directory, and delivers in the original conversation. For Telegram, message the bot directly or mention it in a configured group; the Source's health shows the last poll's result.
+From an allowed GitHub account, open an Issue or post a comment containing `@<agent login> <request>`. Within a polling interval (one minute by default), Overview should show a Ticket. The agent acknowledges the request, works in its own Session and directory, and delivers in the original conversation. For Telegram, message the bot directly or mention it in a configured group; the Source's health shows the last poll's result. A request that needs a desktop app, such as "open Finder and rename the file", exercises the desktop skill once `agent-desktop status` reports the permission.
 
 ## Upgrade
 

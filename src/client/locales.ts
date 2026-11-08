@@ -453,6 +453,7 @@ const TEXT = {
   'promptPart.runtime/handoff/worker': ['工单交付与人工确认（执行器）', 'Ticket handoff and human confirmation (Executor)'],
   'promptPart.runtime/policy/none': ['策略（没有启用的规则时）', 'Policy (when no rule is enabled)'],
   'promptPart.skill/telegram': ['Telegram 技能', 'Telegram skill'],
+  'promptPart.skill/desktop': ['桌面技能', 'Desktop skill'],
   'promptPart.skill/github': ['GitHub 技能', 'GitHub skill'],
   'promptPart.runtime/environment': ['执行环境', 'Execution environment'],
   promptViewEdit: ['编辑', 'Edit'],
