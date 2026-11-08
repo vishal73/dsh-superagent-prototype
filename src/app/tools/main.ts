@@ -264,6 +264,36 @@ export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
       },
     }),
     tool({
+      name: 'orchestrator_model_set',
+      description: 'Change the model assessments (orchestrator) or worker Sessions use, on an explicit human request; '
+        + 'read the providers and model ids with orchestrator_read models first, and confirm the new choice in one line.',
+      schema: z.object({
+        role: z.enum(['orchestrator', 'worker', 'both'])
+          .describe('orchestrator changes the main Session and assessment role; worker changes Executor Sessions; both changes each.'),
+        provider: z.string().min(1).describe('Provider id from orchestrator_read models, such as deepseek-official.'),
+        model: z.string().min(1).describe('Model id that provider lists, such as deepseek-flash.'),
+        reasoningEffort: z.string().min(1).optional().describe('One of the model\'s reasoning efforts, when it has them.'),
+      }).strict(),
+      execute: async args => {
+        const catalog = await host.context.sessionController.modelCatalog()
+        const group = catalog.groups.find(item => item.id === args.provider)
+        if (!group || !group.models.some(item => item.id === args.model)) {
+          const known = catalog.groups.map(item => `${item.id}: ${item.models.map(model => model.id).join(', ')}`).join('; ')
+          throw new Error(`Unknown model ${args.provider}/${args.model}; available providers and models: ${known}`)
+        }
+        const selection = { provider: args.provider, model: args.model, ...(args.reasoningEffort ? { reasoningEffort: args.reasoningEffort } : {}) }
+        const save = (block: 'eval' | 'executor') => {
+          const settings = host.store.settings()
+          const value = block === 'eval' ? { ...settings.eval, model: selection } : { ...settings.executor, model: selection }
+          return host.settings.save(block, value, host.settings.block(block).revision, 'tool')
+        }
+        if (args.role !== 'worker') await save('eval')
+        if (args.role !== 'orchestrator') await save('executor')
+        const settings = host.store.settings()
+        return { orchestrator: settings.eval.model, worker: settings.executor.model }
+      },
+    }),
+    tool({
       name: 'orchestrator_policy_sync',
       description: 'Refresh one Source\'s part of the Policy from where that Source keeps it. GitHub keeps its allowed list locally; the operation is the Web button\'s.',
       schema: z.object({ source: z.string() }).strict(),
