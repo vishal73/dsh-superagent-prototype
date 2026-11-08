@@ -68,7 +68,7 @@ describe('Telegram messages as Triggers', () => {
       id: key('telegram', '42:10'), source: 'telegram',
       threads: [{ source: 'telegram', id: '42:10' }], actor: { source: 'telegram', id: '42' },
       human: true, addressed: 'direct', at: '2023-11-14T22:13:20.000Z',
-      channel: { source: 'telegram', thread: 'telegram:42:10', address: { chatId: '42', messageId: '10' } },
+      channel: { source: 'telegram', thread: 'telegram:42:10', address: { chatId: '42', messageId: '10', direct: 'true' } },
       meta: { chatId: '42', chatType: 'private', messageId: '10', threadId: '42:10', root: '10', direct: true, mentioned: false },
     })
     expect(trigger.text).toBe('please fix the flaky test')
@@ -188,6 +188,11 @@ describe('Telegram kind and plugin', () => {
       { id: 'direct', label: { zh: '私聊', en: 'Direct messages' }, note: { zh: '不接收', en: 'Not received' }, cells: { listedUnaddressed: false, unlistedAddressed: false, unlistedUnaddressed: false } },
     ])
     expect(telegramKind.scope!({ meta: { chatId: '-100123', direct: false } }, config)).toEqual({ listened: true, observed: false, row: '-100123' })
+    // A direct chat is a reply destination only while direct messages are received; the address must say it is direct.
+    expect(telegramKind.channel!.allowed!({ chatId: '42', messageId: '10', direct: 'true' }, config)).toBe(false)
+    expect(telegramKind.channel!.allowed!({ chatId: '42', messageId: '10', direct: 'true' },
+      telegramKind.schema.parse({ directMessages: true }))).toBe(true)
+    expect(telegramKind.channel!.allowed!({ chatId: '42', messageId: '10' }, telegramKind.schema.parse({ directMessages: true }))).toBe(false)
   })
   it('registers the kind and reports setupPending while the deployment is unconfigured', async () => {
     const h = host({ configured: () => false })

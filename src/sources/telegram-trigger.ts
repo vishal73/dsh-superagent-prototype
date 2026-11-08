@@ -32,11 +32,15 @@ export type TelegramUpdate = z.infer<typeof UpdateSchema>
 /** Thread of a chat: one per forum topic, otherwise one per reply chain, named after the message that started it. */
 export const telegramThreadId = (chatId: number | string, topic: number | string | undefined, root: number | string): string =>
   `${chatId}:${topic === undefined ? String(root) : `topic-${topic}`}`
-/** Constructs the reply address; a forum topic is part of it so the reply lands in the same topic. */
+/**
+ * Constructs the reply address; a forum topic is part of it so the reply lands in the same topic, and `direct` records a
+ * private chat because the chat ID alone does not say whether the Source still listens to it.
+ */
 export const telegramChannel = (chatId: number | string, messageId: number | string, topic?: number | string, url?: string,
-  root?: number | string): ChannelRef => ({
+  root?: number | string, direct = false): ChannelRef => ({
   source: SOURCE, thread: `telegram:${telegramThreadId(chatId, topic, root ?? messageId)}`,
-  address: { chatId: String(chatId), messageId: String(messageId), ...(topic === undefined ? {} : { topic: String(topic) }), ...(url ? { url } : {}) },
+  address: { chatId: String(chatId), messageId: String(messageId), ...(topic === undefined ? {} : { topic: String(topic) }),
+    ...(url ? { url } : {}), ...(direct ? { direct: 'true' } : {}) },
 })
 /** Deterministic trigger ID for a message; an edit appends its `edit_date` so the edit is a new event. */
 export const telegramTriggerId = (chatId: number | string, messageId: number | string, version?: number): string =>
@@ -82,7 +86,7 @@ export function telegramTrigger(update: TelegramUpdate, me: TelegramMe,
     ...(addressed ? { addressed } : {}),
     at,
     text: message.text ?? message.caption ?? '',
-    channel: telegramChannel(chatId, message.message_id, topic, url, root),
+    channel: telegramChannel(chatId, message.message_id, topic, url, root, direct),
     ...(url ? { url } : {}),
     meta: { chatId: String(chatId), chatType: message.chat.type, messageId: String(message.message_id),
       threadId: telegramThreadId(chatId, topic, root), root: String(root), direct, mentioned,

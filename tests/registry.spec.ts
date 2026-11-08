@@ -155,7 +155,7 @@ describe('Source registry', () => {
       chat: { id: 42, type: 'private' }, from: { id: 42, is_bot: false, username: 'alice' }, text: 'fix it' } },
     { id: 7, is_bot: true, username: 'widgets_bot' })!
     const channel = trigger.channel!
-    expect(channel.address).toEqual({ chatId: '42', messageId: '10' })
+    expect(channel.address).toEqual({ chatId: '42', messageId: '10', direct: 'true' })
     const commands = new Commands(() => testDeployment(), {}, new AbortController().signal)
     const fetch = vi.fn(async (_url: string, _init?: RequestInit) => ({ status: 200, json: async () => ({ ok: true, result: { message_id: 20 } }) }) as Response)
     vi.stubGlobal('fetch', fetch)
