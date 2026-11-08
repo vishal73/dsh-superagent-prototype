@@ -10,3 +10,6 @@
 # Feishu is optional: uncomment to enable its Source, then set the bot's lark-cli on the Feishu Source.
 # - id: dsh-superagent-feishu
 #   disabled: false
+# Telegram is optional too: uncomment to enable its Source, and start the profile with TELEGRAM_BOT_TOKEN in its environment.
+# - id: dsh-superagent-telegram
+#   disabled: false
