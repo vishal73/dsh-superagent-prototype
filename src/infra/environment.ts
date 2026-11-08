@@ -60,7 +60,8 @@ export function agentVariables(stateDir: string): Record<string, string | undefi
 /** True when a regular file starts with the dsh-superagent marker in its first two lines; a symbolic link, directory, or other non-regular file never counts as written by dsh-superagent. */
 async function written(file: string): Promise<boolean> {
   if (!(await lstat(file)).isFile()) return false
-  const head = (await readFile(file, 'utf8')).split('\n', 2)
+  // A Windows shim states the marker as a `rem` comment so `cmd` can run it.
+  const head = (await readFile(file, 'utf8')).split('\n', 2).map(line => line.replace(/^rem /i, '').replace(/\r$/, ''))
   return [MARKER, ...LEGACY_MARKERS].some(marker => head.includes(marker))
 }
 async function own(file: string, text: string, mode = 0o644): Promise<void> {
@@ -83,20 +84,35 @@ export async function writeEnvironment(deployment: Pick<Deployment, 'stateDir' |
   const before = await readdir(dir)
   for (const name of before) { const file = join(dir, name); if (!await written(file)) throw new SetupError('foreignFile', { file }) }
   // Workers may be running concurrently: write each shim to a temp file and atomically rename it so no command ever resolves past the shim directory.
+  const windows = process.platform === 'win32'
   const kept = new Set<string>()
   const shim = async (name: string, body: string): Promise<void> => {
-    const temporary = join(dir, `.${name}.${process.pid}.tmp`)
-    await writeFile(temporary, `#!/bin/sh\n${MARKER}\n${body}\n`, { mode: 0o755 })
-    await rename(temporary, join(dir, name))
-    kept.add(name)
+    // Windows finds a command by PATHEXT, so its shims carry `.cmd`; elsewhere the bare name is the file.
+    const file = windows ? `${name}.cmd` : name
+    const temporary = join(dir, `.${file}.${process.pid}.tmp`)
+    await writeFile(temporary, windows ? `@echo off\r\nrem ${MARKER}\r\n${body}\r\n` : `#!/bin/sh\n${MARKER}\n${body}\n`,
+      windows ? {} : { mode: 0o755 })
+    await rename(temporary, join(dir, file))
+    kept.add(file)
   }
   const withoutShims = [
     `self=${shellQuote(dir)}`, 'rest=', 'IFS=:', 'set -f',
     'for entry in $PATH; do [ "$entry" = "$self" ] || rest="${rest:+$rest:}$entry"; done',
     'set +f', 'unset IFS', 'PATH=$rest', 'export PATH',
   ].join('\n')
-  const run = (program: string): string => `${withoutShims}\nexec ${shellQuote(program)} "$@"`
-  const fail = (message: string): string => `echo ${shellQuote(message)} >&2\nexit 1`
+  // A Windows shim walks PATH once, dropping its own directory, so a wrapper script that calls `gh` reaches the real binary.
+  const windowsWithoutShims = [
+    'setlocal EnableDelayedExpansion', 'set "self=%~dp0"', 'if "!self:~-1!"=="\\" set "self=!self:~0,-1!"',
+    'set "rest="', 'for %%e in ("%PATH:;=";"%") do (', '  set "entry=%%~e"',
+    '  if not "!entry!"=="" (', '    if "!entry:~-1!"=="\\" set "entry=!entry:~0,-1!"',
+    '    if /i not "!entry!"=="!self!" set "rest=!rest!;!entry!"', '  )', ')', 'set "PATH=!rest:~1!"',
+  ].join('\r\n')
+  const run = (program: string): string => windows
+    ? `${windowsWithoutShims}\r\n"${program}" %*\r\nexit /b %ERRORLEVEL%`
+    : `${withoutShims}\nexec ${shellQuote(program)} "$@"`
+  const fail = (message: string): string => windows
+    ? `1>&2 echo ${message.replace(/[%^&|<>]/g, char => `^${char}`)}\r\nexit /b 1`
+    : `echo ${shellQuote(message)} >&2\nexit 1`
   await shim('gh', run(github.cli))
   for (const name of new Set(blockedCommands.filter(name => !WORKER_COMMANDS.includes(name)))) {
     await shim(name, fail(`${name} is blocked in this installation; use gh, which acts as ${github.login}.`))
@@ -138,7 +154,11 @@ export async function verifyEnvironment(deployment: Pick<Deployment, 'github' | 
   const { github, stateDir } = deployment
   // `-z` separates fields with NUL and never quotes paths.
   const helpers = (await runAsWorker(subprocess, ['git', 'config', '-z', '--show-origin', '--get-all', 'credential.https://github.com.helper'], stateDir, AbortSignal.any([signal, AbortSignal.timeout(60_000)])).catch(() => '')).split('\0')
-  if (helpers.join('\0') !== [`file:${workerGitConfig(stateDir)}`, credentialHelper(github.cli), ''].join('\0')) throw new SetupError('gitTooOld')
+  // Git prints origins with forward slashes and, on Windows, may differ in case from the configured path.
+  const origin = (value: string): string => process.platform === 'win32'
+    ? value.replace(/\\/g, '/').toLowerCase() : value
+  const expected = [`file:${workerGitConfig(stateDir)}`, credentialHelper(github.cli), '']
+  if (helpers.map(origin).join('\0') !== expected.map(origin).join('\0')) throw new SetupError('gitTooOld')
 }
 
 /**

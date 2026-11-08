@@ -1,0 +1,12 @@
+{
+  "project": "/Users/vishal/gitcode/dsh-superagent-prototype",
+  "name": "dsh-superagent",
+  "host": "100.105.105.124",
+  "user": "vishal",
+  "identity_file": "~/.ssh/id_ed25519",
+  "remote_root": "C:/Users/visha/gitcode",
+  "services": [],
+  "ports": [
+    {"name": "panel", "role": "application", "remote": 3082, "local": 3082, "scheme": "http", "path": "/", "health_path": "/orchestrator/api/state", "expected_status": 200}
+  ]
+}

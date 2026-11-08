@@ -45,6 +45,9 @@ describe('configuration schema', () => {
       .toEqual({ stateDir: join(dir, 'state'), promptMaxChars: 100000, admissionContextMaxPages: 10, admissionContextTimeoutMs: 15000 })
     expect(() => Config(minimal({ stateDir: 'relative/dir' }))).toThrow()
     expect(() => Config(minimal({ stateDir: '~/dir' }))).toThrow()
+    // Windows paths are absolute too, with either separator.
+    expect(Config(minimal({ stateDir: 'C:\\dsh\\state' })).stateDir).toBe('C:\\dsh\\state')
+    expect(Config(minimal({ stateDir: 'C:/dsh/state' })).stateDir).toBe('C:/dsh/state')
   })
   it('names keys the configuration does not define, and where the values of older keys live now', () => {
     const raw = minimal({ repository: 'acme/widgets', repositoryPath: '/srv/widgets', blockedCommands: [], author: { name: 'Alice' }, extra: 1 })
