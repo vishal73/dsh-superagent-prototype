@@ -59,12 +59,18 @@ All panel API calls need `x-orchestrator-request: 1` and a loopback host.
   directory (shorthands `sol`, `astra`, `luna`, `terra`, plus an effort such as
   `sol xhigh`). It also ships `bin/codex-wrap.mjs` for shell use. Install it
   into a profile with `dsh plugin --profile <name> add link:<checkout>/plugins/dsh-plugin-codex`.
-- **Models**: `deepseek-official` (default), `local-strata`, and `openai-codex`
-  (`gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-astra`, `gpt-6-luna`) through the ChatGPT
-  account signed in to the Codex CLI; the OAuth grant is stored in
-  `~/.dsh/.credentials.yaml` under `llm-pi-ai/openai-codex`. Users pick a model
-  with `orchestrator_model_set`; workers pass it to `subagent` as
-  `provider`/`model`/`reasoning_effort`.
+- **Models**: `openai-codex` (`gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-astra`,
+  `gpt-6-luna`, `gpt-6.1-terra`) through the ChatGPT account signed in to the
+  Codex CLI, plus `deepseek-official` and `local-strata`. The OAuth grant is
+  stored in `~/.dsh/.credentials.yaml` under `llm-pi-ai/openai-codex`.
+- **Model order**: Codex `gpt-6.1-sol` at `xhigh` is the default for the Eval and
+  Executor roles. When a provider reports an exhausted quota (`QUOTA` or
+  `ACCOUNT_QUOTA`), `src/app/model-fallback.ts` retries the step on the next
+  route — DeepSeek `deepseek-flash`, then local Strata — and skips the exhausted
+  provider for 30 minutes. An explicitly chosen DeepSeek or local model is never
+  rewritten; an explicitly chosen Codex model still falls back when Codex is out.
+  Users pick a model with `orchestrator_model_set`; workers pass it to `subagent`
+  as `provider`/`model`/`reasoning_effort`.
 - **Windows specifics**: workers run as `vishal` without per-command approval;
   the host is headless (session 0). Codex GUI apps cannot open; the bundled CLI
   needs `--ignore-user-config` (the user config's `service_tier` is rejected by

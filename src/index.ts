@@ -1,6 +1,7 @@
 /** Main plugin entry: mounts the Runtime and provides its restart callback for deployment account changes. */
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-settings'
+import { installModelFallback } from './app/model-fallback.ts'
 import { Runtime } from './app/runtime.ts'
 import { Config, machineOf, type DeploymentConfig } from './deployment.ts'
 
@@ -19,6 +20,8 @@ export async function apply(ctx: Context, config: DeploymentConfig): Promise<voi
     ctx.fiber.restart().then(() => { ctx.get('settings')?.describe() }).catch((error: unknown) => { ctx.logger.error('dsh-superagent restart failed: %s', String(error)) })
   }
   const runtime = new Runtime(ctx, machine, restart)
+  // Codex first, then DeepSeek, then the local model when a provider reports an exhausted quota.
+  installModelFallback(ctx)
   ctx.effect(() => async () => { await runtime.stop() })
   await runtime.ready
   ctx.logger.info(runtime.configured() ? 'dsh-superagent ready; the Superagent sidebar entry opens the management panel' : `dsh-superagent is waiting for setup: ${runtime.setupProblem?.detail ?? ''}`)

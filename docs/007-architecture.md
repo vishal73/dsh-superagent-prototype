@@ -333,6 +333,7 @@ Some generic modules still refer directly to GitHub or Telegram:
 | `src/app/delivery.ts` | `AgentDelivery`: delivers a message to a DeepSeek Harness agent once per request id, also across a restored Session |
 | `src/app/retry-health.ts` | `RetryHealth`: which Sessions wait on a model budget retry, for the `models` health entry |
 | `src/app/role-models.ts` | Resolves the Eval and Executor models, and seeds a new Session with its role's model |
+| `src/app/model-fallback.ts` | The Codex → DeepSeek → local Strata order: skips a provider whose quota is exhausted, retries the step on the next route, and re-probes after the cooldown |
 | `src/app/assessment.ts` | The MasterAssessor, the assessment schema and the window `orchestrator_eval` answers |
 | `src/app/execution-environment.ts` | The execution environment: its variables, a Ticket's values, the directory root and the lines of the prompt section, which `src/app/prompts.ts` fills into its template |
 | `src/app/source-context.ts` | `sourceContextOf`: each Source kind's `SourceContext` |
@@ -421,6 +422,7 @@ Some generic modules still refer directly to GitHub or Telegram:
 | `tests/background.spec.ts` | Waiting for a worker's shell jobs and subagents: an end that woke it, and a host that stops |
 | `tests/bundle-patch.spec.ts` | The bundle's patch, read as DeepSeek Harness reads it, and the agent preset of Executor Sessions it defines |
 | `tests/codex-plugin.spec.ts` | The Codex plugin under `plugins/dsh-plugin-codex`: its bundle layer, model shorthands, the headless argv, and the `codex` tool's registration and input checks |
+| `tests/model-fallback.spec.ts` | The fallback order (Codex, DeepSeek, local Strata): which provider a request uses, when a quota failure retries the step, and when the cooldown re-probes Codex |
 | `tests/effects.spec.ts` | The effect queue: coalescing, limits, retries with backoff, health and shutdown |
 | `tests/passes.spec.ts` | Passes: one at a time, the ones asked for during a pass run as one after it, and the runtime health a failed pass reports |
 | `tests/outbox.spec.ts` | The Outbox on a running Runtime: messages wait while processing is paused or their Source is not installed |
