@@ -52,11 +52,25 @@ All panel API calls need `x-orchestrator-request: 1` and a loopback host.
 - **Panel**: Overview, Source, Trigger, Eval, Execution, Settings — retry, stop,
   pause, dropped replies, decisions, prompt history.
 - **Skills**: built-ins `github`, `telegram`, `desktop`, `browser`; team skill
-  `codex-on-windows` (see below).
+  `codex-on-windows`, which maps Codex model requests to the `openai-codex`
+  provider and points at the `codex` tool and its CLI wrapper.
+- **Codex plugin**: `plugins/dsh-plugin-codex` mounts a `codex` tool that
+  delegates one bounded task to a Codex CLI run in the Session's working
+  directory (shorthands `sol`, `astra`, `luna`, `terra`, plus an effort such as
+  `sol xhigh`). It also ships `bin/codex-wrap.mjs` for shell use. Install it
+  into a profile with `dsh plugin --profile <name> add link:<checkout>/plugins/dsh-plugin-codex`.
+- **Models**: `deepseek-official` (default), `local-strata`, and `openai-codex`
+  (`gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-astra`, `gpt-6-luna`) through the ChatGPT
+  account signed in to the Codex CLI; the OAuth grant is stored in
+  `~/.dsh/.credentials.yaml` under `llm-pi-ai/openai-codex`. Users pick a model
+  with `orchestrator_model_set`; workers pass it to `subagent` as
+  `provider`/`model`/`reasoning_effort`.
 - **Windows specifics**: workers run as `vishal` without per-command approval;
-  the host is headless (session 0). Codex GUI apps cannot open; the Codex CLI
-  works headless only with `--sandbox danger-full-access` — the
-  `codex-on-windows` team skill encodes this.
+  the host is headless (session 0). Codex GUI apps cannot open; the bundled CLI
+  needs `--ignore-user-config` (the user config's `service_tier` is rejected by
+  CLI 0.130) and `--sandbox danger-full-access` — the `codex-on-windows` team
+  skill and wrapper encode this. Prefer the native provider; an older CLI can
+  answer `model_not_found` for these models.
 - **Not available**: group chats, desktop GUI automation, automatic merging.
 
 ## Change behaviour without code
@@ -115,7 +129,10 @@ without a test or a recorded live reproduction is not ready.
 2. On Windows, update the checkout and rebuild (`git pull`, then `pnpm
    install`/`pnpm run build` as needed).
 3. Restart the service with the launcher (`run-superagent.cmd`) or
-   `scripts/dsh-superagent --profile superagent restart` from Git Bash.
+   `scripts/dsh-superagent --profile superagent restart` from Git Bash. After a
+   forced kill, wait 30 s or delete `C:\Users\visha\.dsh\state\superagent.lock`
+   before starting: a fresh lock makes the new process give up with
+   `Lock file is already being held`.
 4. Verify with the panel API:
 
 ```bash
@@ -139,9 +156,14 @@ list before calling the deploy good.
   directory, and `superagent.log`.
 - **Two processes / lock held**: `orchestrator` health and the lock file in the
   state directory; never start a second instance on the same state directory.
+  A lock left by a killed process is treated as live for 30 s (`stale: 30000`),
+  so the next start fails until it is old or removed.
 - **Codex on Windows**: `timed out after 15000ms connecting runner pipe-in` is
   the known Windows SSH sandbox bug — use `--sandbox danger-full-access` for
-  trusted prompts; never `read-only`/`workspace-write` there.
+  trusted prompts; never `read-only`/`workspace-write` there. The old CLI also
+  rejects the global `service_tier`, so pass `--ignore-user-config`, and it can
+  answer `model_not_found` for `gpt-6.1-sol`; the native `openai-codex` route
+  is the supported path there.
 
 ## Known issues
 

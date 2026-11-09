@@ -1,0 +1,4 @@
+# dsh-plugin-codex: mount the `codex` delegation tool in every Session.
+- insert:
+    - id: codex
+      name: dsh-plugin-codex

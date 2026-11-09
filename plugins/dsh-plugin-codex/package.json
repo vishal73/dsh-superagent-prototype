@@ -1,0 +1,31 @@
+{
+  "name": "dsh-plugin-codex",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Codex CLI delegation for DeepSeek Harness: a `codex` tool, a `codex-wrap` command, and the model/effort shorthands this deployment uses.",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "codex-wrap": "./bin/codex-wrap.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "manifestVersion": 1
+  },
+  "files": [
+    "src",
+    "bin",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT"
+}
