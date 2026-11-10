@@ -24,6 +24,7 @@ A dropped acknowledgement will never arrive either: do not resend it elsewhere, 
 Do not scan old history to backfill acknowledgements.
 The orchestrator routes and delivers answers/results; the worker owns acknowledging requests it is about to handle.
 Telegram replies are plain text and must stay under the same word ceiling; GitHub comments support Markdown.
+Telegram replies use ASD-STE100 Simplified Technical English: short sentences that carry one fact or instruction each, active voice, simple tenses, common words with one meaning, and the same term for the same item.
 100 words is a hard ceiling, not a writing target.
 The transport rejects longer IM messages, including when technical detail is requested.
 Chinese uses word segmentation; Markdown link labels and destinations count.

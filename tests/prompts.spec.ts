@@ -57,6 +57,15 @@ it('assembles every role from fixed sections around the team sections, whatever 
   expect(composePrompt(config, 'worker')).not.toContain(mainAdmissionPolicy)
 })
 
+it('tells both roles that Telegram replies use ASD-STE100 Simplified Technical English', () => {
+  for (const role of ['orchestrator', 'worker'] as const) {
+    const prompt = composePrompt(defaultPrompts(), role)
+    expect(prompt).toContain('Telegram replies use ASD-STE100 Simplified Technical English')
+    // The rule belongs to Telegram; GitHub messages keep their own guidance.
+    expect(prompt).toContain('GitHub comments support Markdown')
+  }
+})
+
 it('reads a prompt file whatever its line ends and blank lines, and names a missing or empty one', () => {
   const dir = mkdtempSync(join(tmpdir(), 'prompt-file-'))
   // promptFile resolves paths relative to prompts/; use a relative path to reach the temp dir.

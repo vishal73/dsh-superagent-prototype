@@ -35,8 +35,8 @@ All panel API calls need `x-orchestrator-request: 1` and a loopback host.
 - **Telegram source**: long-polls `getUpdates`; accepts direct messages from the
   allowed operator; replies in the same chat. Group chats are off (`otherChats:
   none`). Telegram replies use ASD-STE100 Simplified Technical English (short
-  sentences, one fact or instruction each, active voice, consistent terms), set
-  in the saved Communication prompt section rather than in code.
+  sentences, one fact or instruction each, active voice, consistent terms),
+  built into the replies guidance.
 - **GitHub source**: watches `vishal73/product-finder-v2` notifications of
   `@vis-yadav`; the agent comments, commits and opens pull requests as
   `vis-yadav`, so a mention of that account is what starts work.
