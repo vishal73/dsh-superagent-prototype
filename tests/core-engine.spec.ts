@@ -200,6 +200,16 @@ describe('eval', () => {
     expect(h.repo.decisions.byThread('chat:t1')).toEqual([])
     expect(h.repo.threads.get('chat:t1')).toMatchObject({ evaluating: { id: h.requests[0]!.evalId } })
   })
+  it('keeps the decision a pass already recorded for the same Eval', () => {
+    const h = harness()
+    h.engine.receive(trigger('1')); h.pump()
+    const evalId = h.requests[0]!.evalId
+    h.engine.candidateDelivered(evalId)
+    h.repo.decisions.save({ id: key('decision', evalId), evalId, threadKey: 'chat:t1', triggerIds: ['1'], policyVersion: 'v1',
+      at: '2026-09-23T00:00:00.000Z', kind: 'unavailable', reason: [{ code: 'timeout' }], strength: 'explicit' })
+    expect(h.engine.failAssessments({ code: 'providerError', values: { message: 'model down' } })).toBe(0)
+    expect(h.repo.decisions.byThread('chat:t1')).toEqual([expect.objectContaining({ id: key('decision', evalId), reason: [{ code: 'timeout' }] })])
+  })
 })
 describe('subscription fan-out', () => {
   it('delivers a person\'s later message on a subscribed thread to the live ticket as context, and not to Eval', async () => {

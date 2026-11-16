@@ -64,6 +64,8 @@ export class Evals extends EnginePart {
     for (const thread of this.repo.threads.active()) {
       const evaluation = thread.evaluating
       if (!evaluation?.delivered) continue
+      // A pass may have expired this Eval into an unavailable decision already; the stored decision is the one that counts.
+      if (this.repo.decisions.get(key('decision', evaluation.id))) continue
       this.finish(thread, evaluation, { kind: 'unavailable', reason: [reason] })
       ended++
     }

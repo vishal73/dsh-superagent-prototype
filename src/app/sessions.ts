@@ -141,7 +141,13 @@ export class Sessions {
       // those Evals would otherwise wait out two requeues before a timeout hid the cause.
       if (event.type === 'turn/end' && agent.id === this.host.masterId) {
         const failure = providerTurnFailure(event.data)
-        if (failure) this.host.turnFailed?.(failure)
+        // The Eval may have expired into an unavailable decision a pass recorded first; a failure to record this one must not
+        // break the session event stream.
+        if (failure) {
+          try { this.host.turnFailed?.(failure) } catch (error) {
+            this.ctx.logger.warn('dsh-superagent: could not record the assessor\'s provider failure: %s', String(error))
+          }
+        }
       }
     })
     ctx.on('agent/created', async ({ agent }) => { await this.decorate(agent); return undefined })
