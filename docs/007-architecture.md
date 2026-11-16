@@ -422,7 +422,8 @@ Some generic modules still refer directly to GitHub or Telegram:
 | `tests/background.spec.ts` | Waiting for a worker's shell jobs and subagents: an end that woke it, and a host that stops |
 | `tests/bundle-patch.spec.ts` | The bundle's patch, read as DeepSeek Harness reads it, and the agent preset of Executor Sessions it defines |
 | `tests/codex-plugin.spec.ts` | The Codex plugin under `plugins/dsh-plugin-codex`: its bundle layer, model shorthands, the headless argv, and the `codex` tool's registration and input checks |
-| `tests/model-fallback.spec.ts` | The fallback order (Codex, DeepSeek, local Strata): which provider a request uses, when a quota failure retries the step, and when the cooldown re-probes Codex |
+| `tests/model-fallback.spec.ts` | The fallback order (Codex, DeepSeek, local Strata): which provider a request uses, when a quota or credential failure retries the step, and when the cooldown re-probes Codex |
+| `tests/provider-failure.spec.ts` | Which failures mean a provider cannot answer (quota, rejected credential) and which stay transient, and the `turn/end` shape that reports one |
 | `tests/effects.spec.ts` | The effect queue: coalescing, limits, retries with backoff, health and shutdown |
 | `tests/passes.spec.ts` | Passes: one at a time, the ones asked for during a pass run as one after it, and the runtime health a failed pass reports |
 | `tests/outbox.spec.ts` | The Outbox on a running Runtime: messages wait while processing is paused or their Source is not installed |

@@ -4,6 +4,7 @@ import { isoTime, liveTicket } from './model.ts'
 import type { ChannelRef, Decision, PolicyEffect, ThreadRef, Ticket, Trigger } from './model.ts'
 import type { Candidate, Repositories } from './ports.ts'
 import type { EngineOptions } from './part.ts'
+import type { Reason } from './reasons.ts'
 import { Assignments, type WorkerReport } from './assignments.ts'
 import { Evals, type Outcome } from './evals.ts'
 import { Intake, type ReceiveResult } from './intake.ts'
@@ -138,6 +139,13 @@ export class Engine {
 
   /** The assessor delivered an Eval's candidate to its Session: the Eval's deadline counts from now. */
   candidateDelivered(evalId: string): void { this.repo.atomic(() => { this.evals.delivered(evalId, this.options.policy()) }) }
+  /**
+   * Record that the assessor's model cannot answer, such as a rejected credential or a failure every route shares: end each
+   * Eval whose candidate it already took as `unavailable` with `reason`, so the operator reads the provider failure at once
+   * instead of an Eval that expires as a timeout minutes later.
+   * @returns how many Evals ended.
+   */
+  failAssessments(reason: Reason): number { return this.repo.atomic(() => this.evals.unavailable(reason)) }
   /**
    * Queue a stored Trigger for a fresh Eval, such as a person's replay; returns false while an Eval holds it.
    * @throws UserError when the trigger is unknown.

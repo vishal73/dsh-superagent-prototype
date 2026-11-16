@@ -26,10 +26,21 @@ export const DEFAULT_CHAIN: readonly FallbackRoute[] = Object.freeze([
 export const DEFAULT_COOLDOWN_MS = 30 * 60_000
 
 const QUOTA_CODES: ReadonlySet<string> = new Set([QUOTA_EXCEEDED_CODE, ACCOUNT_QUOTA_EXCEEDED_CODE])
+/** Failure codes that name a rejected or unusable credential rather than a transient condition such as a rate limit. */
+const AUTH_CODE = /AUTH|CREDENTIAL/i
 
 /** Whether a normalized failure means the account cannot serve any more requests right now. */
 export function isExhaustion (failure: { readonly code?: string } | undefined): boolean {
   return failure?.code !== undefined && QUOTA_CODES.has(failure.code)
+}
+
+/**
+ * Whether a failure leaves the provider unable to answer this request at all: an exhausted quota, or a credential the
+ * provider rejected, such as an expired OAuth grant. Both justify the same move to the next route; a transient failure such
+ * as a rate limit stays on the provider it happened on.
+ */
+export function isProviderFailure (failure: { readonly code?: string } | undefined): boolean {
+  return isExhaustion(failure) || (failure?.code !== undefined && AUTH_CODE.test(failure.code))
 }
 
 export interface FallbackOptions {
@@ -98,18 +109,19 @@ export function installModelFallback (ctx: Context, options: FallbackOptions = {
     let target: LlmCallConfig | undefined
     try { target = await fallbackFrom(index, config) } catch { target = undefined }
     if (target === undefined) return config
-    ctx.logger.warn('dsh-superagent: %s is over its quota; using %s/%s', config.provider, target.provider, target.model)
+    ctx.logger.warn('dsh-superagent: %s cannot serve this request; using %s/%s', config.provider, target.provider, target.model)
     return target
   })
 
   ctx.on('agent/request-error', async (payload, next) => {
     const index = indexOf(payload.provider)
-    if (index < 0 || !isExhaustion(payload.failure)) return next()
+    if (index < 0 || !isProviderFailure(payload.failure)) return next()
     // A provider that is already skipped keeps the failure terminal, so a request that could not be rewritten cannot loop here.
     if (!available(payload.provider)) return next()
     mark(payload.provider)
     if (nextIndex(index) < 0) return next()
-    ctx.logger.warn('dsh-superagent: %s is over its quota; retrying the step on the next route', payload.provider)
+    ctx.logger.warn('dsh-superagent: %s cannot serve this request (%s); retrying the step on the next route',
+      payload.provider, payload.failure?.code)
     return { kind: 'retry' }
   })
 

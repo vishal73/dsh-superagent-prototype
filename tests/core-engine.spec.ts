@@ -182,6 +182,24 @@ describe('eval', () => {
     expect(h.repo.threads.get('chat:t1')).not.toHaveProperty('evaluating')
     expect(h.repo.threads.get('chat:t1')).not.toHaveProperty('expired')
   })
+  it('records the provider failure at once, instead of a timeout, when the assessor\'s model cannot answer', () => {
+    const h = harness()
+    h.engine.receive(trigger('1')); h.pump()
+    h.engine.candidateDelivered(h.requests[0]!.evalId)
+    const reason = { code: 'providerError', values: { message: 'OAuth refresh failed for openai-codex (401 AUTH)' } }
+    expect(h.engine.failAssessments(reason)).toBe(1)
+    expect(h.repo.decisions.byThread('chat:t1')).toEqual([expect.objectContaining({ kind: 'unavailable', reason: [reason] })])
+    expect(h.repo.threads.get('chat:t1')).toMatchObject({ pending: [] })
+    expect(h.repo.threads.get('chat:t1')).not.toHaveProperty('evaluating')
+    expect(h.assessor.release).toHaveBeenCalledWith(h.requests[0]!.evalId)
+  })
+  it('leaves an Eval whose candidate never reached the assessor to its deadline', () => {
+    const h = harness()
+    h.engine.receive(trigger('1')); h.pump()
+    expect(h.engine.failAssessments({ code: 'providerError', values: { message: 'model down' } })).toBe(0)
+    expect(h.repo.decisions.byThread('chat:t1')).toEqual([])
+    expect(h.repo.threads.get('chat:t1')).toMatchObject({ evaluating: { id: h.requests[0]!.evalId } })
+  })
 })
 describe('subscription fan-out', () => {
   it('delivers a person\'s later message on a subscribed thread to the live ticket as context, and not to Eval', async () => {

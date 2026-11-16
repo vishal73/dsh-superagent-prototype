@@ -70,6 +70,14 @@ it('ignores failures that are not an exhausted quota', async () => {
     .resolves.toEqual({ provider: 'openai-codex', model: 'gpt-6.1-sol' })
 })
 
+it('retries on the next route when a provider rejects the credential, and skips that provider until the cooldown', async () => {
+  const { handlers, install } = host(() => 0)
+  install()
+  await expect(failure(handlers, 'openai-codex', 'AUTH')).resolves.toEqual({ kind: 'retry' })
+  await expect(request(handlers, { provider: 'openai-codex', model: 'gpt-6.1-sol', reasoningEffort: 'xhigh' }))
+    .resolves.toEqual({ provider: 'deepseek-official', model: 'deepseek-flash' })
+})
+
 it('probes Codex again after the cooldown', async () => {
   let now = 0
   const { handlers, install } = host(() => now)

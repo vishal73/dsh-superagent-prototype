@@ -576,6 +576,7 @@ const TEXT = {
   'reason.subscription_removed': ['订阅已移除', 'Subscription removed'],
   'reason.issue_awaiting_eligibility': ['等待 Issue 满足资格', 'Waiting for Issue eligibility'],
   'reason.timeout': ['评估超时未决定', 'Eval timed out'],
+  'reason.providerError': ['模型服务失败：{message}', 'Model provider failed: {message}'],
   'reason.policyChanged': ['评估期间策略已变更', 'Policy changed during the Eval'],
   'reason.noAdmissible': ['没有可准入的触发', 'No admissible Trigger'],
   'reason.startedTicket': ['已经开过工单 {ticket}', 'Already started Ticket {ticket}'],

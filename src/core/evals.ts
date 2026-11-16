@@ -54,6 +54,22 @@ export class Evals extends EnginePart {
     this.repo.threads.save(thread)
   }
   /**
+   * End every Eval whose candidate reached the assessor's Session as `unavailable` for `reason`, without queueing its
+   * Triggers again: a model that cannot answer fails the same Eval the same way. A person queues a Trigger again once the
+   * cause is fixed, and the decision names that cause at once instead of expiring as a timeout. An undelivered Eval is left
+   * alone, since its candidate never reached the model.
+   */
+  unavailable(reason: Reason): number {
+    let ended = 0
+    for (const thread of this.repo.threads.active()) {
+      const evaluation = thread.evaluating
+      if (!evaluation?.delivered) continue
+      this.finish(thread, evaluation, { kind: 'unavailable', reason: [reason] })
+      ended++
+    }
+    return ended
+  }
+  /**
    * An Eval past its deadline queues its Triggers again for a fresh Eval, up to `REQUEUES` times in a row, so a busy
    * assessor does not drop requests; after that it is recorded unavailable.
    */

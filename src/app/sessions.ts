@@ -14,6 +14,7 @@ import type { Effects } from './effects.ts'
 import type { Variable } from './execution-environment.ts'
 import { RetryHealth } from './retry-health.ts'
 import { initializeRoleModel } from './role-models.ts'
+import { isProviderFailure } from './model-fallback.ts'
 import { bundledSkills } from './skill-files.ts'
 import { SKILL_PREFIX, type PromptVersion, type Prompts } from './prompts.ts'
 import type { Store } from './store.ts'
@@ -36,6 +37,11 @@ export interface SessionsHost {
   environment(ticket: Ticket): Variable[]
   /** Tools to register on the main Session (`ticket === undefined`) or on `ticket`'s worker Session. */
   tools(agent: Agent, ticket?: Ticket): Tool[]
+  /**
+   * Called when the main Session's turn ended because its model provider failed, so the Orchestrator can end the Evals it
+   * cannot assess instead of letting them expire as timeouts. A turn that failed for any other reason is not reported.
+   */
+  turnFailed?(failure: { readonly code?: string; readonly message: string }): void
 }
 
 /**
@@ -70,6 +76,18 @@ const DEFAULT_WAIT = 'This shell waits up to 60 seconds by default: pass timeout
   + 'as a waiting step holds back new candidates.'
 /** `sleep` at a command position: the start, after ; & | ( { ! ` or a newline, or after a keyword or a command that runs it. */
 const SLEEP = /(?:^|[;&|({!`\n]|\b(?:do|then|else|elif|if|while|until|time|exec|nohup|command|env)\s)\s*(?:\S*\/)?sleep\b/
+/** The provider failure a `turn/end` event reports, when the turn's model could not answer at all. */
+export function providerTurnFailure(data: unknown): { code?: string; message: string } | undefined {
+  const value = data !== null && typeof data === 'object' ? data as { reason?: unknown } : undefined
+  const reason = value?.reason !== null && typeof value?.reason === 'object'
+    ? value.reason as { kind?: unknown; error?: unknown } : undefined
+  if (reason?.kind !== 'error' || reason.error === null || typeof reason.error !== 'object') return undefined
+  const error = reason.error as { code?: unknown; message?: unknown }
+  if (typeof error.message !== 'string' || !error.message) return undefined
+  const failure = { message: error.message, ...(typeof error.code === 'string' ? { code: error.code } : {}) }
+  return isProviderFailure(failure) ? failure : undefined
+}
+
 /**
  * The main Session's guard: it refuses a bash command that runs sleep or asks to hold the step longer than 30 seconds, and a
  * job wait longer than 5 seconds. Under `standard`, as a main Session created before the router preset runs, the shell holds
@@ -119,6 +137,12 @@ export class Sessions {
       if (!agent || !binding || binding.subagent) return
       this.retryHealth.observe(agent.id, event)
       this.updateModelHealth()
+      // The main Session is the assessor: a turn its model could not answer says nothing about the Triggers it held, and
+      // those Evals would otherwise wait out two requeues before a timeout hid the cause.
+      if (event.type === 'turn/end' && agent.id === this.host.masterId) {
+        const failure = providerTurnFailure(event.data)
+        if (failure) this.host.turnFailed?.(failure)
+      }
     })
     ctx.on('agent/created', async ({ agent }) => { await this.decorate(agent); return undefined })
     // Opening a Session in DSH's Web UI before its first turn may select the default preset for it: select ours again. After

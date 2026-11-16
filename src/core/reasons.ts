@@ -5,6 +5,7 @@
 export const REASONS = {
   said: '{text}',
   timeout: 'Assessment timed out',
+  providerError: 'Model provider failed: {message}',
   policyChanged: 'Policy changed during assessment',
   noAdmissible: 'No admissible trigger',
   startedTicket: 'Already started ticket {ticket}',
