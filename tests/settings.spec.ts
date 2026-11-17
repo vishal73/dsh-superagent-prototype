@@ -54,3 +54,19 @@ it('records nothing for a pause that changes nothing, refuses a sync while setup
   vi.mocked(Setup.prototype.configured).mockRestore()
   expect(() => settings.block('source:x')).toThrow(new UserError('unknownBlock', { block: 'source:x' }))
 })
+
+it('retargets the running main Session when the orchestrator model changes, and leaves workers to their own block', async () => {
+  h = await startRuntime()
+  const { settings, masterId } = h.runtime
+  const select = h.controller.selectModel
+  select.mockClear()
+  const evaluation = settings.block('eval')
+  const orchestrator = { provider: 'deepseek-official', model: 'deepseek-flash' }
+  await settings.save('eval', { ...evaluation.value as object, model: orchestrator }, evaluation.revision, 'panel')
+  expect(select).toHaveBeenCalledWith({ sessionId: masterId, ...orchestrator })
+  select.mockClear()
+  const execution = settings.block('executor')
+  await settings.save('executor', { ...execution.value as object, model: { provider: 'openai-codex', model: 'gpt-6-sol' } },
+    execution.revision, 'panel')
+  expect(select).not.toHaveBeenCalled()
+})

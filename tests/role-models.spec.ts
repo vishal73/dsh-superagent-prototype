@@ -4,7 +4,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import { agentEvents, installModelSelection, type Agent, type ModelSelection, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
-import { initializeRoleModel } from '../src/app/role-models.ts'
+import { initializeRoleModel, selectSessionModel } from '../src/app/role-models.ts'
 const contexts: Context[] = []
 afterEach(async () => { await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose())); vi.restoreAllMocks() })
 async function fixture() {
@@ -62,4 +62,27 @@ it('inherits the host when unset and fails unavailable routes before recording a
   resolve.mockRejectedValueOnce(new Error('unknown provider'))
   await expect(initializeRoleModel(ctx, agent, { provider: 'unknown', model: 'x' })).rejects.toThrow('unknown provider')
   expect(agent.session.snapshotEvents().some(event => event.type === 'model/selection')).toBe(false)
+})
+
+it('retargets a Session that is already loaded, and leaves one that is not to its role seed', async () => {
+  const ctx = new Context(); contexts.push(ctx)
+  const resolve = vi.fn(async value => value)
+  ctx.reflect.provide('llm', { resolveCallConfig: resolve })
+  const loaded = { id: 'master' }
+  ctx.reflect.provide('agents', { get: (id: string) => id === 'master' ? loaded : undefined })
+  const selectModel = vi.fn(async () => {})
+  ctx.reflect.provide('sessionController', { selectModel })
+  await expect(selectSessionModel(ctx, 'not-open-yet', { provider: 'deepseek-official', model: 'deepseek-flash' })).resolves.toBe(false)
+  expect(selectModel).not.toHaveBeenCalled()
+  await expect(selectSessionModel(ctx, 'master', { provider: 'deepseek-official', model: 'deepseek-flash' })).resolves.toBe(true)
+  expect(selectModel).toHaveBeenCalledWith({ sessionId: 'master', provider: 'deepseek-official', model: 'deepseek-flash' })
+})
+it('keeps the Session on its model when the requested route cannot resolve', async () => {
+  const ctx = new Context(); contexts.push(ctx)
+  ctx.reflect.provide('llm', { resolveCallConfig: vi.fn(async () => { throw new Error('unknown provider') }) })
+  ctx.reflect.provide('agents', { get: () => ({ id: 'master' }) })
+  const selectModel = vi.fn(async () => {})
+  ctx.reflect.provide('sessionController', { selectModel })
+  await expect(selectSessionModel(ctx, 'master', { provider: 'unknown', model: 'x' })).rejects.toThrow('unknown provider')
+  expect(selectModel).not.toHaveBeenCalled()
 })

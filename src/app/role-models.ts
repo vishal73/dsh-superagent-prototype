@@ -1,7 +1,8 @@
-/** Resolves and seeds per-role default models on newly created sessions without mutating the global DSH default. */
+/** Resolves and seeds per-role default models on newly created sessions, and retargets a loaded one when its role changes. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, ModelSelection } from '@deepseek-ai/dsh-agent'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { RoleModel } from '../policy.ts'
 
 /** Resolve a configured route through the live provider; catalog membership is not a restriction. */
@@ -9,6 +10,20 @@ export async function resolveRoleModel(ctx: Context, model: RoleModel): Promise<
   const value = await ctx.llm.resolveCallConfig({ provider: model.provider, model: model.model,
     ...(model.reasoningEffort ? { reasoningEffort: ReasoningEffortId(model.reasoningEffort) } : {}) })
   return { provider: value.provider, model: value.model, ...(value.reasoningEffort ? { reasoningEffort: value.reasoningEffort } : {}) }
+}
+
+/**
+ * Point a loaded Session at `model` from its next request, and report whether that Session was loaded. A person's or the
+ * panel's change of a role model must reach the Session already working under it, not only the next one. DSH records the
+ * selection as its profile default too, exactly as its own model picker does; a Session that is not loaded yet needs no
+ * switch, because `initializeRoleModel` seeds it when it opens.
+ * @throws when the provider cannot resolve the route; the Session then keeps its model.
+ */
+export async function selectSessionModel(ctx: Context, sessionId: string, model: RoleModel): Promise<boolean> {
+  if (!ctx.agents.get(sessionId as SessionId)) return false
+  const selected = await resolveRoleModel(ctx, model)
+  await ctx.sessionController.selectModel({ sessionId: sessionId as SessionId, ...selected })
+  return true
 }
 
 /** Seed a role's configured model onto a brand-new session before its first request, leaving later manual or durable selections intact. */

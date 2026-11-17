@@ -63,8 +63,8 @@ export interface SettingsHost {
   /** DSH Cordis context used to validate and resolve role models. */
   readonly context: Context
   readonly lifetime: AbortSignal
-  /** Session manager through which the main Session is notified of saved settings. */
-  readonly sessions: Pick<Sessions, 'notify' | 'delivery'>
+  /** Session manager through which the main Session is notified of saved settings, and retargeted when its role model changes. */
+  readonly sessions: Pick<Sessions, 'notify' | 'delivery' | 'selectOrchestratorModel'>
   /** Source host passed to source kinds' policy syncs and label refreshes. */
   readonly sourceHost: SourceHost
   /** Setup state, account/command checks, and restart trigger when setup-read fields change. */
@@ -188,6 +188,13 @@ export class Settings {
     const blocked = settings.executor.blockedCommands
     const changed = blocked.join(' ') !== old.executor.blockedCommands.join(' ')
     if (changed) await this.host.setup.blockCommands(blocked)
+    // A changed orchestrator role model reaches the main Session too, not only the next one. A Session that cannot take the
+    // selection keeps the setting for the next Session, so the save still stands and the failure is reported.
+    if (block === 'eval' && model && JSON.stringify(model) !== JSON.stringify(previous)) {
+      await sessions.selectOrchestratorModel(model).catch((error: unknown) => {
+        this.host.context.logger.warn('dsh-superagent: saved the orchestrator model but the main Session kept its own: %s', String(error))
+      })
+    }
     // When restarting, the notice stays pending until after the restart; `setup.restart()` defers until this call returns.
     const delivery = restarting ? 'pending' : await sessions.delivery(`settings:${block}`)
     if (restarting) this.host.setup.restart()

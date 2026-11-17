@@ -7,13 +7,14 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import { dirname } from 'node:path'
 import { z } from 'zod'
 import { key, liveTicket, type Ticket } from '../core/index.ts'
+import type { RoleModel } from '../policy.ts'
 import { mandateInstructions, ticketOfSession } from '../executor/dsh.ts'
 import type { HealthEntry } from '../infra/health.ts'
 import { AgentDelivery, messageId } from './delivery.ts'
 import type { Effects } from './effects.ts'
 import type { Variable } from './execution-environment.ts'
 import { RetryHealth } from './retry-health.ts'
-import { initializeRoleModel } from './role-models.ts'
+import { initializeRoleModel, selectSessionModel } from './role-models.ts'
 import { isProviderFailure } from './model-fallback.ts'
 import { bundledSkills } from './skill-files.ts'
 import { SKILL_PREFIX, type PromptVersion, type Prompts } from './prompts.ts'
@@ -185,9 +186,16 @@ export class Sessions {
     await ctx.sessionController.rename({ sessionId: id as SessionId, title })
     return result.agent
   }
+  /**
+   * Point the main Session at the orchestrator role model from its next request, when a person or the panel changes it, so
+   * the change reaches the Session already assessing work instead of only the next one.
+   * @returns whether the main Session was loaded and took the selection.
+   */
+  async selectOrchestratorModel(model: RoleModel): Promise<boolean> {
+    return selectSessionModel(this.ctx, this.host.masterId, model)
+  }
   /** Returns whether `sessionId` already holds the message delivered under `requestId`, or `false` if the session does not exist. */
-  async holds(sessionId: string, requestId: string): Promise<boolean> {
-    const result = await this.ctx.sessionController.resolveAgent(sessionId as SessionId)
+  async holds(sessionId: string, requestId: string): Promise<boolean> {    const result = await this.ctx.sessionController.resolveAgent(sessionId as SessionId)
     return !('error' in result) && await this.agentDelivery.holds(result.agent, key(requestId))
   }
   /** Deliver a message once per request id: to the next turn, the current one, or `inject`ed with its label without waking the agent. */
