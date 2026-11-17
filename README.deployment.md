@@ -7,12 +7,13 @@ it.
 
 | Part | Value |
 | --- | --- |
-| Development checkout | `/Users/vishal/gitcode/dsh-superagent-prototype` (Mac), `9381fc1` |
-| Runtime deployment | `C:\Users\visha\gitcode\dsh-superagent-prototype` (Windows), `9381fc1` |
-| DeepSeek Harness profile | `superagent` (`dsh --profile superagent`) |
+| Development checkout | `/Users/vishal/gitcode/dsh-superagent-prototype` (Mac), tip of `main` |
+| Runtime deployment | `C:\Users\visha\gitcode\dsh-superagent-prototype` (Windows), the same commit, rebuilt there |
+| DeepSeek Harness profile | `superagent` (`dsh --profile superagent --no-open`) |
 | Panel / API | `http://127.0.0.1:3082` — reachable from the Mac through the SSH tunnel `127.0.0.1:3082 → Windows 3082`; open the token URL printed in the log |
 | State directory | `C:\Users\visha\.dsh\state\superagent` — `orchestrator.sqlite`, `work/`, `worker-bin/`, `worker-gitconfig` |
-| Launcher | `C:\Users\visha\.dsh\run-superagent.cmd` (reads `TELEGRAM_BOT_TOKEN` from `C:\Users\visha\.hermes\.env`) |
+| Launcher | `C:\Users\visha\.dsh\run-superagent.cmd` (reads `TELEGRAM_BOT_TOKEN` from `C:\Users\visha\.hermes\.env`; runs headless with `--no-open` and stdin from `NUL`) |
+| Autostart | Scheduled task `DSH-Superagent` — at system startup with a 30 s delay, S4U as `vishal`, restarts on failure. A host reboot no longer leaves the agent down. |
 | Startup log | `C:\Users\visha\.dsh\state\superagent.log` |
 | Telegram | bot `@Wini7Bot`; direct messages only; allowed operator `5555980193` |
 | GitHub | `vishal73/product-finder-v2`, agent account `vis-yadav` (the Windows user's default `gh` account), CLI `gh` |
@@ -21,6 +22,22 @@ it.
 The helper’s saved state still names an old remote path
 (`C:/Users/visha/gitcode/dsh-superagent`); the live checkout is the
 `-prototype` directory above.
+
+Start, restart and inspect the runtime:
+
+```powershell
+schtasks /Run   /TN DSH-Superagent        # start (or restart after stopping)
+schtasks /End   /TN DSH-Superagent        # stop
+schtasks /Query /TN DSH-Superagent /V     # state, trigger, last result
+Get-Content C:\Users\visha\.dsh\state\superagent.log -Tail 40
+```
+
+Startup takes about 45 s when the previous run left a stale
+`C:\Users\visha\.dsh\state\superagent.lock`; the lock expires on its own. A quick
+`Get-NetTCPConnection -LocalPort 3082 -State Listen` shows when the panel is up.
+Do not start inside that 30 s window: a start that loses the lock still serves the
+panel, but neither Source mounts and the API answers without an Orchestrator. If it
+happens, stop it, wait 30 s or delete the lock, and start again.
 
 Reopen the tunnel:
 
@@ -65,14 +82,19 @@ All panel API calls need `x-orchestrator-request: 1` and a loopback host.
   `gpt-6-luna`, `gpt-6.1-terra`) through the ChatGPT account signed in to the
   Codex CLI, plus `deepseek-official` and `local-strata`. The OAuth grant is
   stored in `~/.dsh/.credentials.yaml` under `llm-pi-ai/openai-codex`.
-- **Model order**: Codex `gpt-6.1-sol` at `xhigh` is the default for the Eval and
-  Executor roles. When a provider reports an exhausted quota (`QUOTA` or
-  `ACCOUNT_QUOTA`), `src/app/model-fallback.ts` retries the step on the next
-  route — DeepSeek `deepseek-flash`, then local Strata — and skips the exhausted
-  provider for 30 minutes. An explicitly chosen DeepSeek or local model is never
-  rewritten; an explicitly chosen Codex model still falls back when Codex is out.
-  Users pick a model with `orchestrator_model_set`; workers pass it to `subagent`
-  as `provider`/`model`/`reasoning_effort`.
+- **Model order**: the Eval role — the main Session that assesses work — runs
+  DeepSeek `deepseek-flash`, because a stalled assessor is what silenced Telegram.
+  The Executor role keeps Codex `gpt-6.1-sol` at `xhigh`, so workers start on
+  Codex and fall to DeepSeek, then local Strata. When a provider reports an
+  exhausted quota (`QUOTA` or `ACCOUNT_QUOTA`) or a rejected credential
+  (`AUTH`/`CREDENTIAL`, such as a reused Codex refresh token),
+  `src/app/model-fallback.ts` retries the step on the next route and skips the
+  failed provider for 30 minutes.
+  A role model changed in Settings or with `orchestrator_model_set` now also
+  retargets the running main Session (through DSH's session controller, which
+  records it as the profile default like DSH's own model picker); a changed
+  worker model applies to the workers created after it. Workers pass the same
+  route to `subagent` as `provider`/`model`/`reasoning_effort`.
 - **Windows specifics**: workers run as `vishal` without per-command approval;
   the host is headless (session 0). Codex GUI apps cannot open; the bundled CLI
   needs `--ignore-user-config` (the user config's `service_tier` is rejected by
@@ -158,6 +180,11 @@ list before calling the deploy good.
   A turn cut off by a restart produces no outbox row at all — the answer was
   never queued. See the main Session transcript under
   `C:\Users\visha\.dsh\sessions\--C-Users-visha-.dsh-state-superagent--\`.
+  When the assessor's model cannot answer (a rejected credential, or every route
+  failing), the held Eval now ends at once with
+  `Model provider failed: <the provider's message>` in `overview.problems`; it no
+  longer waits 6 minutes to report `Assessment timed out`. The cause is also in
+  the main Session transcript as a `turn/end` error.
 - **Stuck queue**: `overview.flow` (received/judged/accepted/evaluating/dropped)
   and the `reply`/`delivery` health entries.
 - **Worker failure**: ticket detail (`assignments`, `report`), the ticket
@@ -175,6 +202,13 @@ list before calling the deploy good.
 
 ## Known issues
 
+- The Codex OAuth grant belongs to one host. Windows holds its own, re-issued
+  2026-11-16 (access token valid to about 2026-11-26). Never copy
+  `~/.dsh/.credentials.yaml` between the Mac and Windows: Codex rotates the
+  refresh token on every refresh, so a shared copy is invalidated by whichever
+  host refreshes first. That is what stopped Telegram replies on 2026-11-16 —
+  every assessment turn failed with `refresh_token_reused` and nothing answered
+  the person. Sign in again per host with the headless device flow.
 - Restarting while a reply turn is in flight can lose that reply; the notice is
   already marked delivered and is not replayed. Deploy when idle, and check the
   panel afterwards.
