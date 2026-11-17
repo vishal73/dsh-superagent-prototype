@@ -230,6 +230,15 @@ beforeEach(async () => {
 afterEach(async () => { expect(controller.prompt).not.toHaveBeenCalled(); await runtime?.stop(); vi.restoreAllMocks(); vi.unstubAllGlobals();
   delete process.env.TELEGRAM_BOT_TOKEN; delete process.env.TELEGRAM_API_BASE; rmSync(directory, { recursive: true, force: true }) })
 
+it('seeds a new worker Session from the executor role model, so workers keep the Codex-first order', async () => {
+  const settings = runtime.store.settings()
+  runtime.store.saveSettings({ ...settings, executor: { ...settings.executor,
+    model: { provider: 'openai-codex', model: 'gpt-6.1-sol', reasoningEffort: 'xhigh' } } })
+  const { sessionId } = await acceptedTicket()
+  const worker = agents.get(sessionId) as unknown as { session: { snapshotEvents(): { type: string; data: unknown }[] } }
+  expect(worker.session.snapshotEvents()).toContainEqual({ type: 'model/selection',
+    data: { provider: 'openai-codex', model: 'gpt-6.1-sol', reasoningEffort: 'xhigh' } })
+})
 it('relays an explicit member mention as a candidate and creates the ticket, acknowledgement, subscription and worker on accept', async () => {
   const { trigger, ticket, sessionId } = await acceptedTicket()
   const candidate = relays(runtime.masterId).find(item => item.kind === 'candidate')!
