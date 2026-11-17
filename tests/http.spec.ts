@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { z } from 'zod'
-import { registerHttp } from '../src/app/http.ts'
+import { registerHttp, sameOrigin } from '../src/app/http.ts'
 import { PromptConflict } from '../src/app/prompts.ts'
 import { SettingsConflict } from '../src/app/settings.ts'
 import type { HttpHost } from '../src/app/http.ts'
@@ -96,3 +96,32 @@ it('answers a prompt save that lost a race with 409, and a settings body over 12
     body: { error: `Request exceeds ${128 * 1024} bytes` } })
   expect(saves).toEqual([])
 })
+
+it('accepts only a configured public authority, so the panel also works through a TLS proxy', async () => {
+  const call = serve({ sessions: { delivery: async () => 'injected' }, engine: { unsubscribe: () => true } })
+  const post = (headers: Headers) => call('POST', 'threads/github%3A1/unsubscribe', undefined, headers)
+  const publicPanel = { host: 'vishal.taile57eb7.ts.net:3082', origin: 'http://vishal.taile57eb7.ts.net:3082' }
+  expect(await post(publicPanel)).toMatchObject({ status: 403, body: { error: 'Same-origin management request required' } })
+  process.env.DSH_SUPERAGENT_TRUSTED_HOSTS = 'vishal.taile57eb7.ts.net'
+  try {
+    expect(await post(publicPanel)).toMatchObject({ status: 200 })
+    // A TLS proxy may present the authority without the loopback port, and the Origin uses HTTPS.
+    expect(await post({ host: 'vishal.taile57eb7.ts.net', origin: 'https://vishal.taile57eb7.ts.net' })).toMatchObject({ status: 200 })
+    // The configured authority does not relax the panel header or allow another Origin.
+    expect(await post({ ...publicPanel, 'x-orchestrator-request': undefined })).toMatchObject({ status: 403 })
+    expect(await post({ ...publicPanel, origin: 'http://evil.example' })).toMatchObject({ status: 403 })
+    expect(await post({ host: 'evil.example:3082', origin: 'http://evil.example:3082' })).toMatchObject({ status: 403 })
+  } finally { delete process.env.DSH_SUPERAGENT_TRUSTED_HOSTS }
+  expect(await post(publicPanel)).toMatchObject({ status: 403 })
+})
+
+it('matches a configured authority with or without a port the way dsh web trustedHosts does', () => {
+  const headers = { host: 'panel.example:3082', 'x-orchestrator-request': '1' }
+  expect(sameOrigin({ headers }, 3082, ['panel.example'])).toBe(true)
+  expect(sameOrigin({ headers: { ...headers, host: 'panel.example:443' } }, 3082, ['panel.example'])).toBe(true)
+  expect(sameOrigin({ headers }, 3082, ['panel.example:3082'])).toBe(true)
+  expect(sameOrigin({ headers }, 3082, ['panel.example:443'])).toBe(false)
+  expect(sameOrigin({ headers: { ...headers, host: undefined } }, 3082, ['panel.example'])).toBe(false)
+  expect(sameOrigin({ headers }, 3082, [])).toBe(false)
+})
+

@@ -68,10 +68,34 @@ async function readBody(req: IncomingMessage, maxBytes = 128 * 1024): Promise<un
 function json(res: ServerResponse, status: number, value: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); res.end(JSON.stringify(value))
 }
-export function sameOrigin(req: Pick<IncomingMessage, 'headers'>, port: number): boolean {
+/** Extra authorities the panel is served from, from `DSH_SUPERAGENT_TRUSTED_HOSTS` (comma or space separated `host` or `host:port`). */
+function trustedAuthorities(): string[] {
+  return (process.env.DSH_SUPERAGENT_TRUSTED_HOSTS ?? '').split(/[\s,]+/).filter(Boolean)
+}
+/** Whether request `host` matches one configured authority; an entry without a port accepts any port, as `trustedHosts` does in `dsh web`. */
+function isTrustedAuthority(host: string, entry: string): boolean {
+  const [name, port] = entry.toLowerCase().split(':')
+  const separator = host.lastIndexOf(':')
+  const hostName = separator === -1 ? host : host.slice(0, separator)
+  const hostPort = separator === -1 ? undefined : host.slice(separator + 1)
+  return name === hostName.toLowerCase() && (port === undefined || port === hostPort)
+}
+/**
+ * Decide whether one request is a same-origin request from the panel.
+ * The authority must be loopback or one configured trusted authority, the panel header must be present,
+ * and any attached `Origin` must name that same authority; the transport may stay HTTP behind a TLS proxy.
+ */
+export function sameOrigin(req: Pick<IncomingMessage, 'headers'>, port: number, trusted = trustedAuthorities()): boolean {
   const host = req.headers.host
-  if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) return false
-  return req.headers['x-orchestrator-request'] === '1' && (req.headers.origin === undefined || req.headers.origin === `http://${host}`)
+  if (host === undefined) return false
+  if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}` && !trusted.some(entry => isTrustedAuthority(host, entry))) return false
+  if (req.headers['x-orchestrator-request'] !== '1') return false
+  const origin = req.headers.origin
+  if (origin === undefined) return true
+  let originUrl: URL
+  try { originUrl = new URL(origin) } catch { return false }
+  if (originUrl.protocol !== 'http:' && originUrl.protocol !== 'https:') return false
+  return originUrl.host === host.toLowerCase()
 }
 /** Maps errors to HTTP status codes and structured payloads that the panel localizes in the interface language. */
 function failure(error: unknown): [number, Record<string, unknown>] {
