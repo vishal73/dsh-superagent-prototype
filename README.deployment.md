@@ -12,7 +12,7 @@ it.
 | DeepSeek Harness profile | `superagent` (`dsh --profile superagent --no-open`) |
 | Panel / API | `http://127.0.0.1:3082` — reachable from the Mac through the SSH tunnel `127.0.0.1:3082 → Windows 3082`; open the token URL printed in the log. On the tailnet it is `http://vishal.taile57eb7.ts.net:3082/` through `tailscale serve` (see [Tailnet access](#tailnet-access-for-mobile)) |
 | State directory | `C:\Users\visha\.dsh\state\superagent` — `orchestrator.sqlite`, `work/`, `worker-bin/`, `worker-gitconfig` |
-| Launcher | `C:\Users\visha\.dsh\run-superagent.cmd` (reads `TELEGRAM_BOT_TOKEN` from `C:\Users\visha\.hermes\.env`; runs headless with `--no-open` and stdin from `NUL`) |
+| Launcher | `C:\Users\visha\.dsh\run-superagent.cmd` (reads `TELEGRAM_BOT_TOKEN` from `C:\Users\visha\.hermes\.env`; exports `DSH_SUPERAGENT_TRUSTED_HOSTS`; runs headless with `--no-open --trusted-host vishal.taile57eb7.ts.net` and stdin from `NUL`) |
 | Autostart | Scheduled task `DSH-Superagent` — at system startup with a 30 s delay, S4U as `vishal`, restarts on failure. A host reboot no longer leaves the agent down. |
 | Startup log | `C:\Users\visha\.dsh\state\superagent.log` |
 | Telegram | bot `@Wini7Bot`; direct messages only; allowed operator `5555980193` |
@@ -54,12 +54,14 @@ phone on Tailscale needs no tunnel. `tailscale serve` proxies that name to the l
 panel, which keeps the Web server on `127.0.0.1` and keeps the management routes'
 loopback-only guard satisfied. Three pieces make it work:
 
-1. The profile's `webserver` entry lists the tailnet name in `trustedHosts`, because
-   `dsh web` refuses an untrusted Host on its own `/api` routes.
+1. The launcher passes `--trusted-host vishal.taile57eb7.ts.net` to `dsh`, because
+   `dsh web` refuses an untrusted Host on its own `/api` routes. The flag feeds the
+   `connection` plugin's `trustedHosts`; the bind IP alone would not cover the name.
 2. The launcher exports `DSH_SUPERAGENT_TRUSTED_HOSTS=vishal.taile57eb7.ts.net`.
    `sameOrigin()` accepts that authority (a port-less entry matches any port) with an
    `http` or `https` Origin naming it; loopback stays accepted and every other
-   authority is still 403.
+   authority is still 403. The launcher needs both: `--trusted-host` for the harness
+   shell's `/api`, the variable for the panel's `/orchestrator/api`.
 3. `tailscale serve` publishes the name:
 
 ```powershell
