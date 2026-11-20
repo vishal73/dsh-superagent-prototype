@@ -230,7 +230,7 @@ beforeEach(async () => {
 afterEach(async () => { expect(controller.prompt).not.toHaveBeenCalled(); await runtime?.stop(); vi.restoreAllMocks(); vi.unstubAllGlobals();
   delete process.env.TELEGRAM_BOT_TOKEN; delete process.env.TELEGRAM_API_BASE; rmSync(directory, { recursive: true, force: true }) })
 
-it('seeds a new worker Session from the executor role model, so workers keep the Codex-first order', async () => {
+it('seeds a new worker Session from the executor role model', async () => {
   const settings = runtime.store.settings()
   runtime.store.saveSettings({ ...settings, executor: { ...settings.executor,
     model: { provider: 'openai-codex', model: 'gpt-6.1-sol', reasoningEffort: 'xhigh' } } })

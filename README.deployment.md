@@ -115,10 +115,13 @@ phone.
   `gpt-6-luna`, `gpt-6.1-terra`) through the ChatGPT account signed in to the
   Codex CLI, plus `deepseek-official` and `local-strata`. The OAuth grant is
   stored in `~/.dsh/.credentials.yaml` under `llm-pi-ai/openai-codex`.
-- **Model order**: the Eval role — the main Session that assesses work — runs
-  DeepSeek `deepseek-flash`, because a stalled assessor is what silenced Telegram.
-  The Executor role keeps Codex `gpt-6.1-sol` at `xhigh`, so workers start on
-  Codex and fall to DeepSeek, then local Strata. When a provider reports an
+- **Model order**: both roles run DeepSeek `deepseek-flash`. The Eval role — the
+  main Session that assesses work — runs it because a stalled assessor is what
+  silenced Telegram. The Executor role names the same route explicitly, so every
+  new worker starts on DeepSeek; it does not inherit the profile default, which
+  the main Session's own selection rewrites. A request DeepSeek cannot serve
+  falls to the local Strata model, because Codex sits earlier in the fallback
+  chain and is used only when a role names it. When a provider reports an
   exhausted quota (`QUOTA` or `ACCOUNT_QUOTA`) or a rejected credential
   (`AUTH`/`CREDENTIAL`, such as a reused Codex refresh token),
   `src/app/model-fallback.ts` retries the step on the next route and skips the
